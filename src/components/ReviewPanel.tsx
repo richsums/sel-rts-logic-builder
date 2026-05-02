@@ -1,0 +1,127 @@
+import React, { useState } from 'react';
+import Editor from '@monaco-editor/react';
+import { CheckCircle, XCircle, Edit3, ChevronLeft, ChevronRight, ClipboardCheck } from 'lucide-react';
+import { useProjectStore } from '../store/project';
+import { validateScript } from '../rts/validator';
+
+export function ReviewPanel() {
+  const { scripts, approveScript, rejectScript, updateScriptContent } = useProjectStore();
+  const [reviewIdx, setReviewIdx] = useState(0);
+
+  if (scripts.length === 0) {
+    return (
+      <div className="h-full flex items-center justify-center text-slate-500">
+        <div className="text-center">
+          <ClipboardCheck className="w-12 h-12 mx-auto mb-3 text-slate-300" />
+          <p>No scripts to review. Import a settings file first.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const current = scripts[reviewIdx];
+  const validation = current ? validateScript(current.content) : null;
+  const approved = scripts.filter(s => s.approved).length;
+  const rejected = scripts.filter(s => !s.approved).length;
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* Review Header */}
+      <div className="px-4 py-3 border-b border-slate-200 bg-white flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-4">
+          <span className="text-sm font-semibold text-slate-700">
+            Script {reviewIdx + 1} of {scripts.length}
+          </span>
+          <div className="flex items-center gap-2 text-sm">
+            <span className="flex items-center gap-1 text-green-600">
+              <CheckCircle className="w-4 h-4" />{approved} approved
+            </span>
+            <span className="flex items-center gap-1 text-red-500">
+              <XCircle className="w-4 h-4" />{rejected} rejected
+            </span>
+          </div>
+        </div>
+
+        {/* Nav + Actions */}
+        <div className="flex items-center gap-2">
+          <button onClick={() => setReviewIdx(i => Math.max(0, i - 1))} disabled={reviewIdx === 0} className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-40">
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <button onClick={() => setReviewIdx(i => Math.min(scripts.length - 1, i + 1))} disabled={reviewIdx === scripts.length - 1} className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-40">
+            <ChevronRight className="w-4 h-4" />
+          </button>
+          <div className="h-5 w-px bg-slate-200 mx-1" />
+          <button
+            onClick={() => approveScript(current.id)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${current.approved ? 'bg-green-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-green-50 hover:text-green-700'}`}
+          >
+            <CheckCircle className="w-4 h-4" />Approve
+          </button>
+          <button
+            onClick={() => rejectScript(current.id)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${!current.approved ? 'bg-red-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-red-50 hover:text-red-700'}`}
+          >
+            <XCircle className="w-4 h-4" />Reject
+          </button>
+        </div>
+      </div>
+
+      {/* Script Info Bar */}
+      <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center gap-4 text-sm flex-wrap">
+        <span className="font-mono font-bold text-blue-700">{current.label}</span>
+        <span className={`px-2 py-0.5 rounded text-xs font-medium ${patternBadge(current.pattern)}`}>Pattern {current.pattern}</span>
+        <span className="text-slate-500">Lines: {current.sourceLines.join(', ')}</span>
+        {current.modified && <span className="text-amber-600 text-xs font-medium">● Manually modified</span>}
+        {validation && (
+          validation.valid
+            ? <span className="text-green-600 flex items-center gap-1 text-xs"><CheckCircle className="w-3.5 h-3.5" />Valid</span>
+            : <span className="text-red-600 flex items-center gap-1 text-xs"><XCircle className="w-3.5 h-3.5" />{validation.errors[0]}</span>
+        )}
+      </div>
+
+      {/* Editor */}
+      <div className="flex-1">
+        <Editor
+          height="100%"
+          defaultLanguage="plaintext"
+          value={current.content}
+          onChange={val => { if (val !== undefined) updateScriptContent(current.id, val); }}
+          theme="vs-light"
+          options={{
+            fontSize: 13,
+            fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+            lineNumbers: 'on',
+            wordWrap: 'off',
+            minimap: { enabled: false },
+            scrollBeyondLastLine: false,
+          }}
+        />
+      </div>
+
+      {/* Script Status Overview */}
+      <div className="px-4 py-2 border-t border-slate-200 bg-white flex gap-1 flex-wrap">
+        {scripts.map((s, i) => (
+          <button
+            key={s.id}
+            onClick={() => setReviewIdx(i)}
+            title={`${s.label} — ${s.approved ? 'Approved' : 'Rejected'}`}
+            className={`w-7 h-7 rounded text-xs font-mono font-bold transition-colors ${
+              i === reviewIdx ? 'ring-2 ring-blue-400' : ''
+            } ${s.approved ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-600 hover:bg-red-200'}`}
+          >
+            {s.label.slice(0, 2)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function patternBadge(p: string): string {
+  const m: Record<string, string> = {
+    A: 'bg-blue-100 text-blue-700', B: 'bg-red-100 text-red-700',
+    C: 'bg-purple-100 text-purple-700', D: 'bg-indigo-100 text-indigo-700',
+    E: 'bg-amber-100 text-amber-700', F: 'bg-gray-100 text-gray-700', G: 'bg-green-100 text-green-700',
+  };
+  return m[p] ?? 'bg-slate-100 text-slate-600';
+}
