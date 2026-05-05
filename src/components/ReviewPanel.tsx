@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import Editor from '@monaco-editor/react';
-import { CheckCircle, XCircle, Edit3, ChevronLeft, ChevronRight, ClipboardCheck } from 'lucide-react';
+import { CheckCircle, XCircle, ChevronLeft, ChevronRight, ClipboardCheck, AlertTriangle } from 'lucide-react';
 import { useProjectStore } from '../store/project';
 import { validateScript } from '../rts/validator';
 
@@ -23,6 +23,8 @@ export function ReviewPanel() {
   const validation = current ? validateScript(current.content) : null;
   const approved = scripts.filter(s => s.approved).length;
   const rejected = scripts.filter(s => !s.approved).length;
+  const invalid = scripts.filter(s => s.validationErrors && s.validationErrors.length > 0).length;
+  const hasValidationError = !!(current && current.validationErrors && current.validationErrors.length > 0);
 
   return (
     <div className="h-full flex flex-col">
@@ -39,6 +41,11 @@ export function ReviewPanel() {
             <span className="flex items-center gap-1 text-red-500">
               <XCircle className="w-4 h-4" />{rejected} rejected
             </span>
+            {invalid > 0 && (
+              <span className="flex items-center gap-1 bg-red-500 text-white text-xs rounded-full px-2 py-0.5 font-bold">
+                <AlertTriangle className="w-3 h-3" />{invalid} invalid
+              </span>
+            )}
           </div>
         </div>
 
@@ -53,7 +60,14 @@ export function ReviewPanel() {
           <div className="h-5 w-px bg-slate-200 mx-1" />
           <button
             onClick={() => approveScript(current.id)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${current.approved ? 'bg-green-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-green-50 hover:text-green-700'}`}
+            disabled={hasValidationError}
+            title={hasValidationError ? 'Fix validation errors before approving' : undefined}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
+              ${hasValidationError
+                ? 'bg-slate-100 text-slate-400 cursor-not-allowed opacity-60'
+                : current.approved
+                  ? 'bg-green-600 text-white'
+                  : 'bg-slate-100 text-slate-600 hover:bg-green-50 hover:text-green-700'}`}
           >
             <CheckCircle className="w-4 h-4" />Approve
           </button>
@@ -66,16 +80,32 @@ export function ReviewPanel() {
         </div>
       </div>
 
+      {/* Validation Error Banner */}
+      {hasValidationError && (
+        <div className="px-4 py-2 bg-red-50 border-b border-red-200 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
+          <div className="text-sm text-red-700">
+            <span className="font-semibold">Validation errors — this script cannot be approved or exported: </span>
+            {current.validationErrors!.join(' · ')}
+          </div>
+        </div>
+      )}
+
       {/* Script Info Bar */}
       <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center gap-4 text-sm flex-wrap">
         <span className="font-mono font-bold text-blue-700">{current.label}</span>
         <span className={`px-2 py-0.5 rounded text-xs font-medium ${patternBadge(current.pattern)}`}>Pattern {current.pattern}</span>
         <span className="text-slate-500">Lines: {current.sourceLines.join(', ')}</span>
         {current.modified && <span className="text-amber-600 text-xs font-medium">● Manually modified</span>}
-        {validation && (
+        {validation && !hasValidationError && (
           validation.valid
             ? <span className="text-green-600 flex items-center gap-1 text-xs"><CheckCircle className="w-3.5 h-3.5" />Valid</span>
             : <span className="text-red-600 flex items-center gap-1 text-xs"><XCircle className="w-3.5 h-3.5" />{validation.errors[0]}</span>
+        )}
+        {validation && validation.warnings.length > 0 && (
+          <span className="text-amber-600 flex items-center gap-1 text-xs">
+            <AlertTriangle className="w-3.5 h-3.5" />{validation.warnings[0]}
+          </span>
         )}
       </div>
 
@@ -100,18 +130,27 @@ export function ReviewPanel() {
 
       {/* Script Status Overview */}
       <div className="px-4 py-2 border-t border-slate-200 bg-white flex gap-1 flex-wrap">
-        {scripts.map((s, i) => (
-          <button
-            key={s.id}
-            onClick={() => setReviewIdx(i)}
-            title={`${s.label} — ${s.approved ? 'Approved' : 'Rejected'}`}
-            className={`w-7 h-7 rounded text-xs font-mono font-bold transition-colors ${
-              i === reviewIdx ? 'ring-2 ring-blue-400' : ''
-            } ${s.approved ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-600 hover:bg-red-200'}`}
-          >
-            {s.label.slice(0, 2)}
-          </button>
-        ))}
+        {scripts.map((s, i) => {
+          const isInvalid = s.validationErrors && s.validationErrors.length > 0;
+          return (
+            <button
+              key={s.id}
+              onClick={() => setReviewIdx(i)}
+              title={`${s.label} — ${isInvalid ? 'Invalid (validation errors)' : s.approved ? 'Approved' : 'Rejected'}`}
+              className={`w-7 h-7 rounded text-xs font-mono font-bold transition-colors ${
+                i === reviewIdx ? 'ring-2 ring-blue-400' : ''
+              } ${
+                isInvalid
+                  ? 'bg-red-200 text-red-800 hover:bg-red-300'
+                  : s.approved
+                    ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+              }`}
+            >
+              {s.label.slice(0, 2)}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -119,9 +158,16 @@ export function ReviewPanel() {
 
 function patternBadge(p: string): string {
   const m: Record<string, string> = {
-    A: 'bg-blue-100 text-blue-700', B: 'bg-red-100 text-red-700',
-    C: 'bg-purple-100 text-purple-700', D: 'bg-indigo-100 text-indigo-700',
-    E: 'bg-amber-100 text-amber-700', F: 'bg-gray-100 text-gray-700', G: 'bg-green-100 text-green-700',
+    A: 'bg-blue-100 text-blue-700',
+    B: 'bg-red-100 text-red-700',
+    C: 'bg-purple-100 text-purple-700',
+    D: 'bg-indigo-100 text-indigo-700',
+    E: 'bg-amber-100 text-amber-700',
+    F: 'bg-gray-100 text-gray-700',
+    G: 'bg-green-100 text-green-700',
+    H: 'bg-cyan-100 text-cyan-700',
+    I: 'bg-rose-100 text-rose-700',
+    J: 'bg-teal-100 text-teal-700',
   };
   return m[p] ?? 'bg-slate-100 text-slate-600';
 }

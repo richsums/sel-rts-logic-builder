@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronDown, ChevronRight, FileText, Settings, Code } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileText, Settings, Code, AlertTriangle } from 'lucide-react';
 import { useProjectStore } from '../store/project';
 
 export function SettingsViewer() {
@@ -45,6 +45,11 @@ export function SettingsViewer() {
             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeView === 'logic' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
           >
             <Code className="w-4 h-4 inline mr-1" />Logic ({relay.logicEquations.length})
+            {relay.logicEquations.filter(e => e.parseError).length > 0 && (
+              <span className="ml-1.5 bg-amber-500 text-white text-xs rounded-full px-1.5 py-0.5 leading-none">
+                {relay.logicEquations.filter(e => e.parseError).length}
+              </span>
+            )}
           </button>
         </div>
       </div>
@@ -84,15 +89,25 @@ export function SettingsViewer() {
         ) : (
           <div className="space-y-2">
             {relay.logicEquations.map((eq, i) => (
-              <div key={i} className="border border-slate-200 rounded-lg p-3 hover:border-blue-200 hover:bg-blue-50/30 transition-colors">
+              <div key={i} className={`border rounded-lg p-3 transition-colors ${eq.parseError ? 'border-amber-300 bg-amber-50/40 hover:bg-amber-50' : 'border-slate-200 hover:border-blue-200 hover:bg-blue-50/30'}`}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className="font-mono font-bold text-blue-700">{eq.label}</span>
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${fnTypeColor(eq.functionType)}`}>{eq.functionType}</span>
+                      {eq.parseError && (
+                        <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700 border border-amber-300">
+                          <AlertTriangle className="w-3 h-3" />Parse error
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-slate-500 mb-1">{eq.description}</p>
-                    <code className="text-sm text-slate-700 bg-slate-100 px-2 py-1 rounded block font-mono break-all">{eq.expression}</code>
+                    <code className={`text-sm px-2 py-1 rounded block font-mono break-all ${eq.parseError ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'}`}>{eq.expression}</code>
+                    {eq.parseError && eq.parseErrorReason && (
+                      <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3 flex-shrink-0" />{eq.parseErrorReason}
+                      </p>
+                    )}
                   </div>
                   <span className="text-xs text-slate-400 whitespace-nowrap">L{eq.source.lineNumber}</span>
                 </div>

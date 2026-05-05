@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Download, Package, FileText, BarChart3, FileJson, Archive } from 'lucide-react';
+import { Download, Package, FileText, BarChart3, FileJson, Archive, AlertTriangle } from 'lucide-react';
 import { useProjectStore } from '../store/project';
 import { useUIStore } from '../store/ui';
 import { buildExportPackage, downloadBlob } from '../export/package';
@@ -10,7 +10,9 @@ export function ExportPanel() {
   const { showNotification } = useUIStore();
   const [exporting, setExporting] = useState(false);
 
-  const approved = scripts.filter(s => s.approved);
+  const invalid = scripts.filter(s => s.validationErrors && s.validationErrors.length > 0);
+  const validScripts = scripts.filter(s => !(s.validationErrors && s.validationErrors.length > 0));
+  const approved = validScripts.filter(s => s.approved);
   const rejected = scripts.filter(s => !s.approved);
 
   const handleExportZip = async () => {
@@ -20,7 +22,7 @@ export function ExportPanel() {
     }
     setExporting(true);
     try {
-      const blob = await buildExportPackage(relay, testCases, scripts, coverage);
+      const blob = await buildExportPackage(relay, testCases, approved, coverage);
       const tag = relay.tag ?? 'RELAY';
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16);
       downloadBlob(blob, `${tag}_RTS_Scripts_${ts}.zip`);
@@ -62,11 +64,9 @@ export function ExportPanel() {
     const reader = new FileReader();
     reader.onload = ev => {
       try {
-        const data = JSON.parse(ev.target?.result as string);
-        if (data.scripts) {
-          useProjectStore.getState().setScripts(data.scripts);
-          showNotification('success', 'Project loaded successfully');
-        }
+        const json = ev.target?.result as string;
+        useProjectStore.getState().loadProject(json);
+        showNotification('success', 'Project loaded successfully');
       } catch {
         showNotification('error', 'Invalid project file');
       }
@@ -92,12 +92,26 @@ export function ExportPanel() {
         Bundle approved scripts with traceability matrix and coverage report into a ZIP archive.
       </p>
 
+      {/* Invalid scripts warning */}
+      {invalid.length > 0 && (
+        <div className="mb-5 rounded-lg p-4 bg-red-50 border border-red-200 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="font-semibold text-red-700">{invalid.length} script{invalid.length > 1 ? 's' : ''} excluded — validation errors</p>
+            <p className="text-sm text-red-600 mt-0.5">
+              These scripts have validation errors and will not be included in the export:&nbsp;
+              {invalid.map(s => s.label).join(', ')}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
         {[
           { label: 'Total Scripts', value: scripts.length, color: 'text-slate-700' },
           { label: 'Approved', value: approved.length, color: 'text-green-600' },
-          { label: 'Rejected', value: rejected.length, color: 'text-red-600' },
+          { label: 'Invalid', value: invalid.length, color: invalid.length > 0 ? 'text-red-600' : 'text-slate-400' },
           { label: 'Coverage', value: coverage ? `${coverage.coveragePercent}%` : '—', color: 'text-blue-600' },
         ].map(card => (
           <div key={card.label} className="bg-white rounded-xl border border-slate-200 p-4 text-center">
@@ -116,10 +130,11 @@ export function ExportPanel() {
               <h3 className="font-bold text-lg">Full Export Package (.zip)</h3>
             </div>
             <p className="text-blue-100 text-sm mb-1">
-              Contains all {approved.length} approved RTS scripts, traceability.csv, coverage.json, project.json
+              Contains all {approved.length} valid approved RTS scripts, traceability.csv, coverage.json, project.json
+              {invalid.length > 0 && <span className="ml-1 text-red-200">· {invalid.length} invalid excluded</span>}
             </p>
             <ul className="text-xs text-blue-200 list-disc list-inside">
-              <li>rts-scripts/ — {approved.length} .rts files</li>
+              <li>rts-scripts/ — {approved.length} .rts files (valid + approved only)</li>
               <li>traceability.csv — script ↔ setting ↔ source line</li>
               <li>coverage.json — signal coverage report</li>
               <li>project.json — full project state</li>

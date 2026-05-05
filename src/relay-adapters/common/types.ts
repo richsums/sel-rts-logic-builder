@@ -1,5 +1,6 @@
 // ─── Source Traceability ─────────────────────────────────────────────────────
 
+/** Every parsed element carries its origin for full traceability. */
 export interface SourceRef {
   sourceFile: string;
   lineNumber: number;
@@ -8,7 +9,16 @@ export interface SourceRef {
 
 // ─── Relay Model ─────────────────────────────────────────────────────────────
 
-export type RelayModelId = 'SEL-351' | 'SEL-751' | 'SEL-451' | 'UNKNOWN';
+export type RelayModelId =
+  | 'SEL-351'
+  | 'SEL-411L'
+  | 'SEL-421'
+  | 'SEL-451'
+  | 'SEL-711'
+  | 'SEL-751'
+  | 'SEL-787'
+  | 'SEL-2411'
+  | 'UNKNOWN';
 
 export interface RelayModel {
   id: RelayModelId;
@@ -26,19 +36,22 @@ export interface SettingEntry {
 }
 
 export interface SettingGroup {
-  name: string;          // e.g. "MAIN", "SET1", "SELOGIC"
+  name: string;          // e.g. "MAIN", "SET1", "SELOGIC", "GROUP1"
   entries: SettingEntry[];
-  source: SourceRef;     // first line of the section header
+  source: SourceRef;
 }
 
 // ─── Logic Equation ───────────────────────────────────────────────────────────
 
 export interface LogicEquation {
-  label: string;         // e.g. "TR" (trip), "51P1T" (OC pickup timer)
-  expression: string;    // raw SELogic expression string
-  description: string;   // human-readable description
+  label: string;
+  expression: string;
+  description: string;
   source: SourceRef;
   functionType: LogicFunctionType;
+  /** True if the expression could not be parsed cleanly */
+  parseError?: boolean;
+  parseErrorReason?: string;
 }
 
 export type LogicFunctionType =
@@ -51,6 +64,10 @@ export type LogicFunctionType =
   | 'TIMER_OUT'
   | 'ALARM'
   | 'OUTPUT'
+  | 'RISING_EDGE'
+  | 'COMM_ASSISTED'
+  | 'DIFFERENTIAL'
+  | 'RECLOSER'
   | 'GENERAL';
 
 // ─── Parsed Relay Settings ────────────────────────────────────────────────────
@@ -64,6 +81,8 @@ export interface ParsedRelaySettings {
   rawLines: string[];
   sourceFile: string;
   lineCount: number;
+  /** Import-level fatal parse error */
+  importError?: string;
 }
 
 // ─── Detector Result ─────────────────────────────────────────────────────────
@@ -71,6 +90,6 @@ export interface ParsedRelaySettings {
 export interface DetectionResult {
   detected: boolean;
   model: RelayModelId;
-  confidence: number;   // 0–1
+  confidence: number;
   hints: string[];
 }

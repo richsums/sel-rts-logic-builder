@@ -1,9 +1,16 @@
 // ─── SELogic Tokenizer ────────────────────────────────────────────────────────
 
+/** All token types produced by the SELogic lexer. */
 export type TokenType =
-  | 'AND' | 'OR' | 'NOT' | 'XOR'
-  | 'LPAREN' | 'RPAREN'
-  | 'OPERAND' | 'LITERAL'
+  | 'AND'
+  | 'OR'
+  | 'NOT'
+  | 'XOR'
+  | 'EDGE'       // ^ prefix — rising edge
+  | 'LPAREN'
+  | 'RPAREN'
+  | 'OPERAND'
+  | 'LITERAL'
   | 'EOF';
 
 export interface Token {
@@ -12,11 +19,31 @@ export interface Token {
   pos: number;
 }
 
-const OPERATORS: Record<string, TokenType> = {
-  AND: 'AND', OR: 'OR', NOT: 'NOT', XOR: 'XOR',
-  '*': 'AND', '+': 'OR', '!': 'NOT', '&': 'AND', '|': 'OR',
+/** Single-character operator mapping */
+const SINGLE_CHAR_OPS: Record<string, TokenType> = {
+  '*': 'AND',
+  '+': 'OR',
+  '!': 'NOT',
+  '&': 'AND',
+  '|': 'OR',
+  '^': 'EDGE',
 };
 
+/** Keyword operator mapping (case-insensitive) */
+const KEYWORD_OPS: Record<string, TokenType> = {
+  AND:   'AND',
+  OR:    'OR',
+  NOT:   'NOT',
+  XOR:   'XOR',
+  EDGE:  'EDGE',
+  R_TRIG: 'EDGE',
+};
+
+/**
+ * Tokenize a SELogic expression string into a flat list of tokens.
+ * Handles: AND/OR/NOT/XOR/EDGE keywords, *, +, !, &, |, ^, parentheses,
+ * identifiers (signal names), and integer literals 0/1.
+ */
 export function tokenize(expr: string): Token[] {
   const tokens: Token[] = [];
   let i = 0;
@@ -29,22 +56,22 @@ export function tokenize(expr: string): Token[] {
     if (expr[i] === '(') { tokens.push({ type: 'LPAREN', value: '(', pos: i++ }); continue; }
     if (expr[i] === ')') { tokens.push({ type: 'RPAREN', value: ')', pos: i++ }); continue; }
 
-    // Single-char operators
-    if ('*+!&|'.includes(expr[i])) {
+    // Single-character operators
+    if (expr[i] in SINGLE_CHAR_OPS) {
       const ch = expr[i];
-      tokens.push({ type: OPERATORS[ch] as TokenType, value: ch, pos: i++ });
+      tokens.push({ type: SINGLE_CHAR_OPS[ch], value: ch, pos: i++ });
       continue;
     }
 
-    // Identifiers (operands, keywords, literals)
+    // Identifiers, keywords, and numeric literals
     if (/[A-Za-z0-9_]/.test(expr[i])) {
       let j = i;
       while (j < expr.length && /[A-Za-z0-9_.#]/.test(expr[j])) j++;
       const word = expr.slice(i, j);
       const upper = word.toUpperCase();
 
-      if (upper in OPERATORS) {
-        tokens.push({ type: OPERATORS[upper] as TokenType, value: word, pos: i });
+      if (upper in KEYWORD_OPS) {
+        tokens.push({ type: KEYWORD_OPS[upper], value: word, pos: i });
       } else if (upper === '0' || upper === '1') {
         tokens.push({ type: 'LITERAL', value: upper, pos: i });
       } else {
@@ -54,7 +81,7 @@ export function tokenize(expr: string): Token[] {
       continue;
     }
 
-    // Skip unknown chars
+    // Skip unknown characters (e.g., := assignment in PAC syntax)
     i++;
   }
 
