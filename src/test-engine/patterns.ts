@@ -1,6 +1,6 @@
 // ─── Test Pattern Library (A–J) ───────────────────────────────────────────────
 
-export type PatternId = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J';
+export type PatternId = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'INHIBIT';
 
 export interface TestPattern {
   id: PatternId;
@@ -11,6 +11,12 @@ export interface TestPattern {
 
 /** All test patterns available in the pattern library. */
 export const TEST_PATTERNS: Record<PatternId, TestPattern> = {
+  INHIBIT: {
+    id: 'INHIBIT',
+    name: 'NOT-Condition Inhibit Test',
+    description: 'Assert blocking signal (or de-assert supervisor); verify trip is blocked. Remove block; verify trip now asserts. Proves NOT/AND guard is causally effective.',
+    applicableTypes: ['TRIP', 'BLOCK'],
+  },
   A: {
     id: 'A',
     name: 'Simple Assertion',

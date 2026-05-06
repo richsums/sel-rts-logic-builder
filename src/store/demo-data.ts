@@ -39,6 +39,9 @@ function settings(model: ParsedRelaySettings['model'], tag: string, fw: string,
 }
 
 // ─── SEL-351 FDR01 (enhanced) ─────────────────────────────────────────────────
+// TR := 51PT * !50BF * 52A
+//   One positive path: leaf=51PT, AND=[52A], NOT=[50BF]
+//   Inhibit tests: 51PT_INHIBIT_50BF (NOT guard), 51PT_INHIBIT_52A (AND supervisor)
 
 const F = 'SEL351_FDR01.txt';
 export const DEMO_SEL351: ParsedRelaySettings = settings('SEL-351', 'FDR01', 'R300-V1', [
@@ -47,24 +50,25 @@ export const DEMO_SEL351: ParsedRelaySettings = settings('SEL-351', 'FDR01', 'R3
     { k: '51P1P',  v: '5.00',  l: 10 }, { k: '51P1TD', v: '0.50', l: 11 },
     { k: '51P1CT', v: 'U1',    l: 12 }, { k: '50P1P',  v: '20.00',l: 13 },
     { k: '51G1P',  v: '1.00',  l: 14 }, { k: '51G1TD', v: '0.30', l: 15 },
+    { k: '50BFP',  v: '1.25',  l: 16 }, { k: '50BFTD', v: '0.06', l: 17 },
   ], F, 9),
   grp('SELOGIC', [
-    { k: 'TR',     v: '51P1T + 51G1T + 50P1 + 50G1', l: 20 },
-    { k: '51P1TC', v: '51P1',                          l: 21 },
-    { k: '51G1TC', v: '51G1',                          l: 22 },
-    { k: 'LT1S',   v: 'TR',                            l: 23 },
-    { k: 'LT1R',   v: 'IN101',                         l: 24 },
-    { k: 'OUT101', v: 'LT1',                           l: 25 },
-    { k: 'ALARM',  v: '51P1 + 51G1',                   l: 26 },
+    { k: 'TR',     v: '51PT * !50BF * 52A',   l: 20 },
+    { k: '51P1TC', v: '51P1',                  l: 21 },
+    { k: '51G1TC', v: '51G1',                  l: 22 },
+    { k: 'LT1S',   v: 'TR',                    l: 23 },
+    { k: 'LT1R',   v: 'IN101',                 l: 24 },
+    { k: 'OUT101', v: 'LT1',                   l: 25 },
+    { k: 'ALARM',  v: '51PT + 50BF',           l: 26 },
   ], F, 19),
 ], [
-  eq('TR',     '51P1T + 51G1T + 50P1 + 50G1', 'Trip',                    'TRIP',      F, 20),
-  eq('51P1TC', '51P1',                          'Phase OC Timer Control', 'TIMER_IN',  F, 21),
-  eq('51G1TC', '51G1',                          'Ground OC Timer Control','TIMER_IN',  F, 22),
-  eq('LT1S',   'TR',                            'Latch 1 Set',            'LATCH_SET', F, 23),
-  eq('LT1R',   'IN101',                         'Latch 1 Reset',          'LATCH_RESET',F,24),
-  eq('OUT101', 'LT1',                           'Output 101',             'OUTPUT',    F, 25),
-  eq('ALARM',  '51P1 + 51G1',                   'Alarm',                  'ALARM',     F, 26),
+  eq('TR',     '51PT * !50BF * 52A',  'Trip (OC supervised by 52A, blocked by 50BF)', 'TRIP',       F, 20),
+  eq('51P1TC', '51P1',                 'Phase OC Timer Control',                        'TIMER_IN',   F, 21),
+  eq('51G1TC', '51G1',                 'Ground OC Timer Control',                       'TIMER_IN',   F, 22),
+  eq('LT1S',   'TR',                  'Latch 1 Set',                                    'LATCH_SET',  F, 23),
+  eq('LT1R',   'IN101',               'Latch 1 Reset',                                  'LATCH_RESET',F, 24),
+  eq('OUT101', 'LT1',                 'Output 101',                                     'OUTPUT',     F, 25),
+  eq('ALARM',  '51PT + 50BF',         'Alarm',                                          'ALARM',      F, 26),
 ], F, 30);
 
 // ─── SEL-411L LDR01 (line differential) ──────────────────────────────────────
@@ -99,6 +103,9 @@ export const DEMO_SEL411L: ParsedRelaySettings = settings('SEL-411L', 'LDR01', '
 ], L, 35);
 
 // ─── SEL-421 DTR01 (POTT distance) ───────────────────────────────────────────
+// TR := (21P + 21G + 67P) * RxWI * !BLK
+//   Three positive paths: leaf=21P, 21G, 67P — all with AND=[RxWI], NOT=[BLK]
+//   Inhibit tests: _INHIBIT_BLK (NOT guard), _INHIBIT_RxWI (AND supervisor)
 
 const D = 'SEL421_DTR01.txt';
 export const DEMO_SEL421: ParsedRelaySettings = settings('SEL-421', 'DTR01', 'R500-V2', [
@@ -106,34 +113,30 @@ export const DEMO_SEL421: ParsedRelaySettings = settings('SEL-421', 'DTR01', 'R5
   grp('SET1', [
     { k: '21P1R', v: '4.50', l: 10 }, { k: '21P2R', v: '8.00', l: 11 },
     { k: '21P3R', v: '12.00',l: 12 }, { k: '21G1R', v: '5.00', l: 13 },
-    { k: '67ANG', v: '85',   l: 14 }, { k: '51PPU', v: '6.00', l: 15 },
-    { k: '51PTD', v: '1.00', l: 16 },
+    { k: '67ANG', v: '85',   l: 14 }, { k: '67PPU', v: '4.00', l: 15 },
+    { k: '67PTD', v: '0.50', l: 16 },
   ], D, 9),
   grp('SELOGIC', [
-    { k: 'TR',    v: 'Z1G + POTT + 51PT * !BLK51', l: 20 },
-    { k: 'POTT',  v: '(21P2 + 21G2) * 67P * RxWI', l: 21 },
-    { k: 'TxWI',  v: '(21P2 + 21G2) * 67P',        l: 22 },
-    { k: 'BLK21', v: '!52A',                         l: 23 },
-    { k: 'BLK51', v: 'BLK21 + 21P1',                l: 24 },
-    { k: '51PTC', v: '67P * !BLK51',                 l: 25 },
-    { k: 'LT1S',  v: 'TR',                           l: 26 },
-    { k: 'LT1R',  v: '^IN101',                        l: 27 },
-    { k: 'ALARM', v: '21P3 + 51P',                    l: 28 },
-    { k: 'OUT101',v: 'LT1',                           l: 29 },
-    { k: 'OUT102',v: 'TxWI',                          l: 30 },
+    { k: 'TR',    v: '(21P + 21G + 67P) * RxWI * !BLK', l: 20 },
+    { k: 'TxWI',  v: '(21P + 21G + 67P)',                l: 21 },
+    { k: 'BLK',   v: '!52A',                              l: 22 },
+    { k: '67PTC', v: '67P * !BLK',                        l: 23 },
+    { k: 'LT1S',  v: 'TR',                                l: 24 },
+    { k: 'LT1R',  v: '^IN101',                             l: 25 },
+    { k: 'ALARM', v: '21P + 67P',                          l: 26 },
+    { k: 'OUT101',v: 'LT1',                                l: 27 },
+    { k: 'OUT102',v: 'TxWI',                               l: 28 },
   ], D, 19),
 ], [
-  eq('TR',    'Z1G + POTT + 51PT * !BLK51',  'Trip (Z1G OR POTT OR OC backup)',     'TRIP',         D, 20),
-  eq('POTT',  '(21P2 + 21G2) * 67P * RxWI', 'POTT trip — zone 2 + direct + RxWI', 'COMM_ASSISTED', D, 21),
-  eq('TxWI',  '(21P2 + 21G2) * 67P',         'Transmit POTT permissive',            'COMM_ASSISTED', D, 22),
-  eq('BLK21', '!52A',                          'Distance block (breaker open)',       'BLOCK',         D, 23),
-  eq('BLK51', 'BLK21 + 21P1',                 'OC block',                            'BLOCK',         D, 24),
-  eq('51PTC', '67P * !BLK51',                  'OC timer control (supervised)',       'TIMER_IN',      D, 25),
-  eq('LT1S',  'TR',                            'Trip latch set',                      'LATCH_SET',     D, 26),
-  eq('LT1R',  '^IN101',                         'Trip latch reset (rising edge)',      'RISING_EDGE',   D, 27),
-  eq('ALARM', '21P3 + 51P',                    'Alarm (Z3 reach or OC pickup)',       'ALARM',         D, 28),
-  eq('OUT101','LT1',                           'Trip output (latched)',               'OUTPUT',        D, 29),
-  eq('OUT102','TxWI',                          'Transmit POTT output',               'OUTPUT',        D, 30),
+  eq('TR',    '(21P + 21G + 67P) * RxWI * !BLK',  'Trip (dist/dir supervised by RxWI, blocked by BLK)', 'TRIP',         D, 20),
+  eq('TxWI',  '(21P + 21G + 67P)',                  'Transmit POTT permissive',                           'COMM_ASSISTED', D, 21),
+  eq('BLK',   '!52A',                                'Distance block (breaker open)',                      'BLOCK',         D, 22),
+  eq('67PTC', '67P * !BLK',                          'Directional OC timer (supervised)',                  'TIMER_IN',      D, 23),
+  eq('LT1S',  'TR',                                  'Trip latch set',                                     'LATCH_SET',     D, 24),
+  eq('LT1R',  '^IN101',                               'Trip latch reset (rising edge)',                     'RISING_EDGE',   D, 25),
+  eq('ALARM', '21P + 67P',                            'Alarm (distance or directional pickup)',             'ALARM',         D, 26),
+  eq('OUT101','LT1',                                  'Trip output (latched)',                              'OUTPUT',        D, 27),
+  eq('OUT102','TxWI',                                 'Transmit POTT output',                              'OUTPUT',        D, 28),
 ], D, 40);
 
 // ─── SEL-451 DOR01 (distance + OC + SOTF) ────────────────────────────────────
@@ -206,42 +209,45 @@ export const DEMO_SEL711: ParsedRelaySettings = settings('SEL-711', 'FDR02', 'R2
   eq('OUT102','CL',                          'Close output',          'OUTPUT',      R, 38),
 ], R, 45);
 
-// ─── SEL-751 FDR03 (50/51/67 + SEF + cold load) ──────────────────────────────
+// ─── SEL-751 FDR03 (50/51 + blocking logic) ──────────────────────────────────
+// TR := (50P1 + 51PT * !50BF) * !SOTF_BLK
+//   Two positive paths:
+//     leaf=50P1, AND=[], NOT=[SOTF_BLK]
+//     leaf=51PT,  AND=[], NOT=[50BF, SOTF_BLK]
+//   Inhibit tests: INHIBIT_50BF (NOT), INHIBIT_SOTF_BLK (NOT)
 
 const S = 'SEL751_FDR03.txt';
 export const DEMO_SEL751: ParsedRelaySettings = settings('SEL-751', 'FDR03', 'R400-V1', [
   grp('MAIN', [{ k: 'TAG', v: 'FDR03', l: 2 }, { k: 'RID', v: 'FEEDER 03', l: 3 }], S, 1),
   grp('SET1', [
-    { k: '51PPU', v: '4.00',  l: 10 }, { k: '51PTD', v: '0.35', l: 11 },
-    { k: '67PPU', v: '4.00',  l: 12 }, { k: '67GTD', v: '0.20', l: 13 },
-    { k: 'SEFPU', v: '0.10',  l: 14 }, { k: 'SEFTD', v: '0.50', l: 15 },
-    { k: '50P1P', v: '20.00', l: 16 },
+    { k: '51PPU',  v: '4.00',  l: 10 }, { k: '51PTD',  v: '0.35',  l: 11 },
+    { k: '51PCT',  v: 'U1',    l: 12 }, { k: '50P1P',  v: '20.00', l: 13 },
+    { k: '67PPU',  v: '4.00',  l: 14 }, { k: '67PTD',  v: '0.20',  l: 15 },
+    { k: '50BFP',  v: '1.25',  l: 16 }, { k: '67ANG',  v: '85',    l: 17 },
   ], S, 9),
   grp('SELOGIC', [
-    { k: 'TR',   v: '67PT + 67GT + 50P1 + SEF_TRIP * !CLDI',l: 20 },
-    { k: '67PTC',v: '67P * 52A',                              l: 21 },
-    { k: '67GTC',v: '67G * 52A',                              l: 22 },
-    { k: 'SEF_TRIP',v:'SEFT * !CLDI',                         l: 23 },
-    { k: 'CLDI', v: '^52A',                                    l: 24 },
-    { k: 'SV1S', v: 'IN101',                                  l: 25 },
-    { k: 'SV1R', v: 'IN102',                                  l: 26 },
-    { k: 'LT1S', v: 'TR',                                     l: 27 },
-    { k: 'LT1R', v: 'IN103',                                  l: 28 },
-    { k: 'ALARM',v: '51P + 67P + SEF',                         l: 29 },
-    { k: 'OUT101',v:'TR',                                      l: 30 },
+    { k: 'TR',      v: '(50P1 + 51PT * !50BF) * !SOTF_BLK', l: 20 },
+    { k: '51PTC',   v: '51P1 * 52A',                          l: 21 },
+    { k: 'SOTF_BLK',v: 'SOTF * !52A',                         l: 22 },
+    { k: 'SOTF',    v: '^52A',                                 l: 23 },
+    { k: 'SV1S',   v: 'IN101',                                l: 24 },
+    { k: 'SV1R',   v: 'IN102',                                l: 25 },
+    { k: 'LT1S',   v: 'TR',                                   l: 26 },
+    { k: 'LT1R',   v: 'IN103',                                l: 27 },
+    { k: 'ALARM',  v: '51PT + 50BF',                          l: 28 },
+    { k: 'OUT101', v: 'TR',                                   l: 29 },
   ], S, 19),
 ], [
-  eq('TR',      '67PT + 67GT + 50P1 + SEF_TRIP * !CLDI','Trip',                              'TRIP',        S, 20),
-  eq('67PTC',   '67P * 52A',                              'Phase dir. OC timer (supv 52A)',   'TIMER_IN',    S, 21),
-  eq('67GTC',   '67G * 52A',                              'Ground dir. OC timer (supv 52A)',  'TIMER_IN',    S, 22),
-  eq('SEF_TRIP','SEFT * !CLDI',                           'SEF trip (blocked cold load)',     'TRIP',        S, 23),
-  eq('CLDI',    '^52A',                                    'Cold load inhibit (edge)',         'RISING_EDGE', S, 24),
-  eq('SV1S',    'IN101',                                   'SV1 set (remote ctrl)',            'LATCH_SET',   S, 25),
-  eq('SV1R',    'IN102',                                   'SV1 reset',                        'LATCH_RESET', S, 26),
-  eq('LT1S',    'TR',                                     'Trip latch set',                    'LATCH_SET',   S, 27),
-  eq('LT1R',    'IN103',                                  'Trip latch reset',                  'LATCH_RESET', S, 28),
-  eq('ALARM',   '51P + 67P + SEF',                         'Alarm',                            'ALARM',       S, 29),
-  eq('OUT101',  'TR',                                     'Trip output',                       'OUTPUT',      S, 30),
+  eq('TR',       '(50P1 + 51PT * !50BF) * !SOTF_BLK', 'Trip (OC, blocked by 50BF and SOTF_BLK)', 'TRIP',        S, 20),
+  eq('51PTC',    '51P1 * 52A',                          'Phase OC timer control (supv 52A)',        'TIMER_IN',    S, 21),
+  eq('SOTF_BLK', 'SOTF * !52A',                         'SOTF block (switch-onto-fault)',           'BLOCK',       S, 22),
+  eq('SOTF',     '^52A',                                 'Switch-onto-fault edge detect',            'RISING_EDGE', S, 23),
+  eq('SV1S',     'IN101',                                'SV1 set (remote ctrl)',                    'LATCH_SET',   S, 24),
+  eq('SV1R',     'IN102',                                'SV1 reset',                                'LATCH_RESET', S, 25),
+  eq('LT1S',     'TR',                                   'Trip latch set',                           'LATCH_SET',   S, 26),
+  eq('LT1R',     'IN103',                                'Trip latch reset',                         'LATCH_RESET', S, 27),
+  eq('ALARM',    '51PT + 50BF',                          'Alarm',                                    'ALARM',       S, 28),
+  eq('OUT101',   'TR',                                   'Trip output',                              'OUTPUT',      S, 29),
 ], S, 38);
 
 // ─── SEL-787 TXDR01 (transformer differential) ───────────────────────────────

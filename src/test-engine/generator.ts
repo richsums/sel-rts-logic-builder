@@ -3,6 +3,7 @@ import type { DependencyGraph } from '../selogic/graph';
 import { selectPattern, type PatternId } from './patterns';
 import { parseExpression } from '../selogic/parser';
 import { collectSignals } from '../selogic/ast';
+import { enumerateTripPaths, buildInhibitConditions } from '../selogic/trip-paths';
 
 // ─── Test Step Types ──────────────────────────────────────────────────────────
 
@@ -30,14 +31,32 @@ export interface GeneratedTestCase {
   sourceLines: number[];
   states: TestState[];
   signals: string[];
+
+  // ── Path-based test metadata (set for TRIP-equation-derived test cases) ──────
+  /** The primary protection element that drives trip in this path (e.g. '51PT'). */
+  leafElement?: string;
+  /** Supervisor signals that must be SET = 1 alongside the leaf for trip. */
+  andConditions?: string[];
+  /** Blocking signals that must be SET = 0 for the path to be active. */
+  notConditions?: string[];
+
+  // ── Inhibit test metadata (set when pattern === 'INHIBIT') ───────────────────
+  /** The signal being tested as a block (asserted for NOT, de-asserted for AND). */
+  blockingSignal?: string;
+  /** Whether the block is via assertion of a NOT guard or de-assertion of an AND supervisor. */
+  blockingType?: 'NOT' | 'AND';
+
+  // ── Coverage gap flag ────────────────────────────────────────────────────────
+  /** True when no analog injection profile covers this operand. */
+  coverageGap?: boolean;
 }
 
 // ─── Wait/check constants ─────────────────────────────────────────────────────
 
-const SETTLE_MS  = 50;   // signal propagation settle time (ms)
-const INIT_MS    = 100;  // initialisation dwell (ms)
-const TIMER_MS   = 500;  // placeholder timer dwell (ms)
-const EDGE_MS    = 20;   // rising-edge pulse width (ms)
+const SETTLE_MS  = 50;
+const INIT_MS    = 100;
+const TIMER_MS   = 500;
+const EDGE_MS    = 20;
 
 // ─── Step helpers ─────────────────────────────────────────────────────────────
 
@@ -57,7 +76,7 @@ function check(signal: string, val: 0 | 1): TestStep {
   return { type: 'CHECK', signal, value: val };
 }
 
-// ─── Pattern generators ───────────────────────────────────────────────────────
+// ─── Pattern generators (non-TRIP equations) ──────────────────────────────────
 
 function genA(eq: LogicEquation, sigs: string[]): TestState[] {
   const primary = sigs[0] ?? 'IN101';
@@ -76,8 +95,8 @@ function genA(eq: LogicEquation, sigs: string[]): TestState[] {
 }
 
 function genB(eq: LogicEquation, sigs: string[]): TestState[] {
-  const supv    = sigs.find(s => /block|supv|en|ctrl|td|pu/i.test(s)) ?? sigs[1] ?? 'IN102';
-  const pickup  = sigs.find(s => s !== supv) ?? sigs[0] ?? 'IN101';
+  const supv   = sigs.find(s => /block|supv|en|ctrl|td|pu/i.test(s)) ?? sigs[1] ?? 'IN102';
+  const pickup = sigs.find(s => s !== supv) ?? sigs[0] ?? 'IN101';
   return [
     { stateNumber: 1, description: 'Pre-test', steps: [
       comment('De-energise all'), ...setAll(sigs, 0), wait(INIT_MS), check(eq.label, 0),
@@ -175,7 +194,6 @@ function genG(eq: LogicEquation, sigs: string[]): TestState[] {
   ];
 }
 
-/** Pattern H — Rising Edge */
 function genH(eq: LogicEquation, sigs: string[]): TestState[] {
   const edgeSig = sigs[0] ?? 'IN101';
   return [
@@ -201,7 +219,6 @@ function genH(eq: LogicEquation, sigs: string[]): TestState[] {
   ];
 }
 
-/** Pattern I — Latch Dominance */
 function genI(eq: LogicEquation, sigs: string[]): TestState[] {
   const setSig   = sigs[0] ?? 'IN101';
   const resetSig = sigs[1] ?? 'IN102';
@@ -231,7 +248,6 @@ function genI(eq: LogicEquation, sigs: string[]): TestState[] {
   ];
 }
 
-/** Pattern J — Communications-Assisted Trip (POTT/PUTT) */
 function genJ(eq: LogicEquation, sigs: string[]): TestState[] {
   const remSigs = sigs.filter(s => /RX|RXWI|COMM_IN|REM|POTT|PUTT/i.test(s));
   const locSigs = sigs.filter(s => !remSigs.includes(s));
@@ -258,15 +274,14 @@ function genJ(eq: LogicEquation, sigs: string[]): TestState[] {
   ];
 }
 
-// ─── Main Generator ───────────────────────────────────────────────────────────
+// ─── Standard (non-TRIP) test case generator ──────────────────────────────────
 
-/** Generate a single test case for one logic equation. */
-export function generateTestCase(
+function generateNonTripTestCase(
   eq: LogicEquation,
   _graph: DependencyGraph,
 ): GeneratedTestCase {
-  const ast     = parseExpression(eq.expression);
-  const signals = ast ? Array.from(collectSignals(ast)) : [];
+  const ast      = parseExpression(eq.expression);
+  const signals  = ast ? Array.from(collectSignals(ast)) : [];
   const patternId = selectPattern(eq.functionType, eq.expression, signals);
 
   let states: TestState[];
@@ -295,10 +310,107 @@ export function generateTestCase(
   };
 }
 
+// ─── TRIP equation path-based generator ──────────────────────────────────────
+
+/**
+ * Generate test cases for a TRIP-type equation by enumerating every path
+ * through the AST that can independently assert the trip output.
+ *
+ * Returns:
+ *   - One positive test case per protection-element leaf operand in the AST
+ *   - One INHIBIT test case per NOT condition (blocking signal)
+ *   - One INHIBIT test case per AND condition (supervisor signal — de-assertion blocks trip)
+ *
+ * Falls back to the standard genB approach if no protection elements are found
+ * in the AST (e.g., logic-only equations that are typed TRIP).
+ */
+function generateTripTestCases(
+  eq: LogicEquation,
+  _graph: DependencyGraph,
+): GeneratedTestCase[] {
+  const ast = parseExpression(eq.expression);
+  if (!ast) return [generateNonTripTestCase(eq, _graph)];
+
+  const paths = enumerateTripPaths(ast);
+
+  // Fallback: no protection elements found — use standard B pattern
+  if (paths.length === 0) {
+    return [generateNonTripTestCase(eq, _graph)];
+  }
+
+  const signals = ast ? Array.from(collectSignals(ast)) : [];
+  const result: GeneratedTestCase[] = [];
+
+  // ── Positive test cases (one per leaf protection element) ──────────────────
+  for (const path of paths) {
+    const leaf = path.leafElement;
+    // Select pattern based on the leaf element type (A/E for timers, B for supervised, etc.)
+    // We use 'A' as default since the analog renderer drives the actual script structure
+    const patternId = selectPattern('TRIP', leaf, [leaf]);
+    // For protection elements, override to 'E' (timer/operate) if the element is a TOC timer
+    const isTocTimer = /T$/.test(leaf.toUpperCase()) && /^(51|67|SEF)/.test(leaf.toUpperCase());
+    const chosenPattern: PatternId = isTocTimer ? 'E' : (patternId === 'J' ? 'E' : patternId);
+
+    result.push({
+      id: `trip-path-${eq.label}-${leaf}`,
+      label: leaf,
+      description: `${eq.label} positive test via ${leaf}`,
+      pattern: chosenPattern,
+      sourceLines: [eq.source.lineNumber],
+      states: [],  // analog renderer builds its own states
+      signals,
+      leafElement: leaf,
+      andConditions: path.andConditions,
+      notConditions: path.notConditions,
+    });
+  }
+
+  // ── INHIBIT test cases (one per NOT condition + one per AND supervisor) ─────
+  const inhibits = buildInhibitConditions(paths);
+  for (const inh of inhibits) {
+    const leaf = inh.leafElement;
+    const label = `${leaf}_INHIBIT_${inh.signal}`;
+    result.push({
+      id: `inhibit-${eq.label}-${leaf}-${inh.signal}`,
+      label,
+      description: `${eq.label} inhibit test — ${inh.signal} ${inh.blockType === 'NOT' ? 'HIGH' : 'LOW'} blocks trip via ${leaf}`,
+      pattern: 'INHIBIT',
+      sourceLines: [eq.source.lineNumber],
+      states: [],
+      signals,
+      leafElement: leaf,
+      andConditions: inh.otherAndConditions,
+      notConditions: inh.otherNotConditions,
+      blockingSignal: inh.signal,
+      blockingType: inh.blockType,
+    });
+  }
+
+  return result;
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+/** Generate a single test case for one logic equation (non-TRIP fallback). */
+export function generateTestCase(
+  eq: LogicEquation,
+  graph: DependencyGraph,
+): GeneratedTestCase {
+  return generateNonTripTestCase(eq, graph);
+}
+
 /** Generate test cases for all equations in a relay's logic set. */
 export function generateAllTestCases(
   equations: LogicEquation[],
   graph: DependencyGraph,
 ): GeneratedTestCase[] {
-  return equations.map(eq => generateTestCase(eq, graph));
+  const result: GeneratedTestCase[] = [];
+  for (const eq of equations) {
+    if (eq.functionType === 'TRIP') {
+      result.push(...generateTripTestCases(eq, graph));
+    } else {
+      result.push(generateNonTripTestCase(eq, graph));
+    }
+  }
+  return result;
 }

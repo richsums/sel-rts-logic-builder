@@ -628,49 +628,216 @@ function buildLogicProfile(
   return lines.join('\n') + '\n';
 }
 
+// ─── Inhibit script builder ───────────────────────────────────────────────────
+
+/**
+ * Build an inhibit test script that proves a NOT guard or AND supervisor
+ * causally blocks the trip output.
+ *
+ * Script structure:
+ *   STATE 1 — Prefault, assert blocking condition
+ *   STATE 2 — Inject fault stimulus (same as positive test)
+ *   STATE 3 — Verify trip BLOCKED (element picks up, but trip = 0)
+ *   STATE 4 — Release block, verify trip NOW asserts
+ *   STATE 5 — Remove fault, verify element resets
+ */
+function buildInhibitProfile(
+  tc: GeneratedTestCase,
+  relay: ParsedRelaySettings,
+  map: SettingsMap,
+): string {
+  const leaf         = tc.leafElement ?? tc.label;
+  const blockSig     = tc.blockingSignal ?? 'UNKNOWN';
+  const blockType    = tc.blockingType ?? 'NOT';
+  const andConds     = tc.andConditions ?? [];
+  const notConds     = tc.notConditions ?? [];
+  const protFn       = classifyElement(leaf);
+
+  // Determine fault stimulus channel and magnitude from element type
+  const isGnd     = /51G|51N|50G|50N|SEF|87T/.test(protFn);
+  const ch        = (protFn === '21P' || protFn === '21G' || protFn === '67P' || protFn === '67G') ? 'IA' : (isGnd ? 'IN' : 'IA');
+  const vnom      = getFloat(map, 'VNOM', 67.0);
+
+  // Fault level: 2× pickup for TOC, 1.05× for IOC, Vnom/Z for distance
+  let faultI = 10.0;
+  let faultAngle = 0.0;
+  let injectVoltage = false;
+  if (protFn === '51P' || protFn === '51G' || protFn === '51N' || protFn === 'SEF') {
+    const pickup = extractPickupSetting(map, protFn);
+    faultI = pickup.value * 2.0;
+  } else if (protFn === '50P' || protFn === '50G' || protFn === '50N') {
+    const pickup = extractPickupSetting(map, protFn);
+    faultI = pickup.value * 1.05;
+  } else if (protFn === '21P' || protFn === '21G') {
+    const z1reach = getFloat(map, '21P1R', getFloat(map, '21G1R', 4.0)) * 0.85;
+    faultI = vnom / z1reach;
+    faultAngle = -getFloat(map, '67ANG', 85.0);
+    injectVoltage = true;
+  } else if (protFn === '67P' || protFn === '67G') {
+    const pickup = extractPickupSetting(map, protFn);
+    faultI = pickup.value * 1.1;
+    faultAngle = -getFloat(map, '67ANG', 85.0);
+    injectVoltage = true;
+  } else if (protFn === '87L' || protFn === '87T') {
+    const pickup = extractPickupSetting(map, protFn);
+    faultI = pickup.value * 1.1;
+  }
+
+  // Blocking: NOT type = assert signal to block; AND type = de-assert signal to block
+  const assertVal  = blockType === 'NOT' ? 1 : 0;  // value that creates the block
+  const releaseVal = blockType === 'NOT' ? 0 : 1;  // value that releases the block
+  const blockDesc  = blockType === 'NOT'
+    ? `${blockSig}=1 (NOT guard active — trip blocked)`
+    : `${blockSig}=0 (AND supervisor absent — trip blocked)`;
+  const releaseDesc = blockType === 'NOT'
+    ? `${blockSig}=0 (block removed)`
+    : `${blockSig}=1 (supervisor restored)`;
+
+  const supervisorLines: string[] = [];
+  for (const s of andConds) {
+    supervisorLines.push(`    SET BINARY ${s} 1          * Supervisor / AND condition`);
+  }
+  for (const s of notConds) {
+    supervisorLines.push(`    SET BINARY ${s} 0          * NOT condition — de-assert blocking signal`);
+  }
+
+  const header = buildHeader(tc.label, relay, tc.sourceLines, 'INHIBIT', leaf, 'DIGITAL', [
+    `* ── NOT-Condition Inhibit Test ──────────────────────────────`,
+    `* Blocking Signal:  ${blockSig}  (${blockType} guard)`,
+    `* Block Mechanism:  ${blockDesc}`,
+    `* Protected Element: ${leaf} (${protFn})`,
+    `* Expected:         ${leaf} PICKUP, TRIP output = 0 while blocked`,
+    `*                   TRIP output = 1 after block released`,
+  ]);
+
+  const body: string[] = [
+    `  STATE 1`,
+    `    * Prefault — assert blocking condition before fault`,
+    `    INJECT ${ch} 0.00 0.0`,
+    ...(injectVoltage ? [`    INJECT VA ${fmt(vnom)} 0.0`, `    INJECT VB ${fmt(vnom)} -120.0`, `    INJECT VC ${fmt(vnom)} 120.0`] : []),
+    `    PREFAULT 500`,
+    `    SET BINARY ${blockSig} ${assertVal}    * ${blockDesc}`,
+    ...supervisorLines,
+    `    WAIT 100`,
+    ``,
+    `  STATE 2`,
+    `    * Apply fault stimulus — level that WOULD cause trip without block`,
+    ...(injectVoltage ? [`    INJECT VA ${fmt(vnom * 0.5)} 0.0`] : []),
+    `    INJECT ${ch} ${fmt(faultI)} ${fmt(faultAngle)}`,
+    `    WAIT 300`,
+    ``,
+    `  STATE 3`,
+    `    * Verify: element picks up BUT trip output is blocked`,
+    `    CHECK ELEMENT ${leaf} == PICKUP`,
+    `    CHECK CONTACT TRIP == 0         * Trip must NOT assert while blocked`,
+    `    CHECK ELEMENT TR == 0           * Trip equation output must be 0`,
+    ``,
+    `  STATE 4`,
+    `    * Release block — verify trip NOW asserts (proves block was causal)`,
+    `    SET BINARY ${blockSig} ${releaseVal}    * ${releaseDesc}`,
+    `    WAIT 50`,
+    `    CHECK CONTACT TRIP == 1         * Trip asserts once block removed`,
+    `    CHECK ELEMENT TR == 1`,
+    ``,
+    `  STATE 5`,
+    `    * Remove fault — verify element resets`,
+    `    INJECT ${ch} 0.00 0.0`,
+    ...(injectVoltage ? [`    INJECT VA ${fmt(vnom)} 0.0`] : []),
+    `    WAIT 200`,
+    `    CHECK ELEMENT ${leaf} == RESET`,
+  ];
+
+  return `${header}\nINIT\n${body.join('\n')}\nEND\n`;
+}
+
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
 /**
  * Render a physically meaningful analog injection script for a test case.
- * Automatically selects the injection profile based on the protection function
- * type derived from the equation label and relay settings.
+ *
+ * For path-based test cases (from TRIP equations), uses tc.leafElement to
+ * select the injection profile rather than tc.label. Supervisor/NOT conditions
+ * stored on the test case are emitted as SET BINARY commands in the prefault state.
+ *
+ * For INHIBIT test cases (pattern === 'INHIBIT'), builds a blocking-logic
+ * verification script that proves the guard signal is causally effective.
  */
 export function renderAnalogScript(
   tc: GeneratedTestCase,
   relay: ParsedRelaySettings,
 ): string {
-  const map    = buildSettingsMap(relay);
-  const protFn = classifyElement(tc.label, tc.signals.join(' '));
+  const map = buildSettingsMap(relay);
 
+  // ── INHIBIT pattern ────────────────────────────────────────────────────────
+  if (tc.pattern === 'INHIBIT') {
+    return buildInhibitProfile(tc, relay, map);
+  }
+
+  // ── Path-based positive test: use leafElement if present ──────────────────
+  const elementLabel = tc.leafElement ?? tc.label;
+  const protFn = classifyElement(elementLabel, tc.signals.join(' '));
+
+  // Build supervisor / NOT-condition SET BINARY preamble
+  const condPreamble: string[] = [];
+  if (tc.andConditions && tc.andConditions.length > 0) {
+    condPreamble.push(`    * Supervisor conditions (AND requirements):`);
+    for (const s of tc.andConditions) {
+      condPreamble.push(`    SET BINARY ${s} 1`);
+    }
+  }
+  if (tc.notConditions && tc.notConditions.length > 0) {
+    condPreamble.push(`    * Blocking signals de-asserted (NOT requirements):`);
+    for (const s of tc.notConditions) {
+      condPreamble.push(`    SET BINARY ${s} 0`);
+    }
+  }
+
+  // Attach preamble to relay object via a closure trick: wrap the script
+  // builder call and prefix the preamble into STATE 1 prefault block.
+  // We do this by building the script normally and then injecting the preamble.
+  let script: string;
   switch (protFn) {
-    case '51P':  return buildTOCProfile('51P', map, relay, tc.label, tc.sourceLines, tc.pattern);
-    case '51G':  return buildTOCProfile('51G', map, relay, tc.label, tc.sourceLines, tc.pattern);
-    case '51N':  return buildTOCProfile('51N', map, relay, tc.label, tc.sourceLines, tc.pattern);
-    case 'SEF':  return buildTOCProfile('SEF', map, relay, tc.label, tc.sourceLines, tc.pattern);
-    case '50P':  return buildIOCProfile('50P', map, relay, tc.label, tc.sourceLines, tc.pattern);
-    case '50G':  return buildIOCProfile('50G', map, relay, tc.label, tc.sourceLines, tc.pattern);
-    case '50N':  return buildIOCProfile('50N', map, relay, tc.label, tc.sourceLines, tc.pattern);
-    case '21P':  return buildDistanceProfile('21P', map, relay, tc.label, tc.sourceLines, tc.pattern);
-    case '21G':  return buildDistanceProfile('21G', map, relay, tc.label, tc.sourceLines, tc.pattern);
-    case '87L':  return buildDifferentialProfile('87L', map, relay, tc.label, tc.sourceLines, tc.pattern);
-    case '87T':  return buildDifferentialProfile('87T', map, relay, tc.label, tc.sourceLines, tc.pattern);
-    case '67P':  return buildDirectionalProfile('67P', map, relay, tc.label, tc.sourceLines, tc.pattern);
-    case '67G':  return buildDirectionalProfile('67G', map, relay, tc.label, tc.sourceLines, tc.pattern);
-    case '79':   return buildRecloserProfile(map, relay, tc.label, tc.sourceLines, tc.pattern);
+    case '51P':  script = buildTOCProfile('51P', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
+    case '51G':  script = buildTOCProfile('51G', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
+    case '51N':  script = buildTOCProfile('51N', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
+    case 'SEF':  script = buildTOCProfile('SEF', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
+    case '50P':  script = buildIOCProfile('50P', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
+    case '50G':  script = buildIOCProfile('50G', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
+    case '50N':  script = buildIOCProfile('50N', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
+    case '21P':  script = buildDistanceProfile('21P', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
+    case '21G':  script = buildDistanceProfile('21G', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
+    case '87L':  script = buildDifferentialProfile('87L', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
+    case '87T':  script = buildDifferentialProfile('87T', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
+    case '67P':  script = buildDirectionalProfile('67P', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
+    case '67G':  script = buildDirectionalProfile('67G', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
+    case '79':   script = buildRecloserProfile(map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
     default:     return buildLogicProfile(tc, relay);
   }
+
+  // Inject supervisor/NOT preamble immediately after INIT and before STATE 1
+  if (condPreamble.length > 0) {
+    const preambleBlock = [
+      `  * ── Supervision / Blocking Signal Setup ──────────────────`,
+      ...condPreamble,
+    ].join('\n');
+    script = script.replace('  STATE 1', `${preambleBlock}\n\n  STATE 1`);
+  }
+
+  return script;
 }
 
 /**
  * Render all test cases for a relay using analog injection profiles.
- * This is the primary rendering path used by the project store.
+ * INHIBIT scripts use a flat filename format; positive tests use Pat<N> suffix.
  */
 export function renderAllAnalogScripts(
   testCases: GeneratedTestCase[],
   relay: ParsedRelaySettings,
 ): Array<{ filename: string; content: string }> {
   return testCases.map(tc => ({
-    filename: `${relay.tag}_${tc.label}_Pat${tc.pattern}.rts`,
+    filename: tc.pattern === 'INHIBIT'
+      ? `${relay.tag}_${tc.label}.rts`
+      : `${relay.tag}_${tc.label}_Pat${tc.pattern}.rts`,
     content: renderAnalogScript(tc, relay),
   }));
 }
