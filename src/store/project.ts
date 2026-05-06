@@ -14,7 +14,7 @@ import type { ScriptRecord } from '../export/formats';
 import { buildDependencyGraph } from '../selogic/graph';
 import { generateAllTestCases } from '../test-engine/generator';
 import { buildCoverageReport } from '../test-engine/coverage';
-import { renderAllScripts } from '../rts/renderer';
+import { renderAllAnalogScripts } from '../rts/analog-renderer';
 import { ALL_DEMO_RELAYS } from './demo-data';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -68,7 +68,7 @@ export interface ProjectState {
 function buildProject(relay: ParsedRelaySettings): RelayProject {
   const graph     = buildDependencyGraph(relay.logicEquations);
   const testCases = generateAllTestCases(relay.logicEquations, graph);
-  const rendered  = renderAllScripts(testCases, relay);
+  const rendered  = renderAllAnalogScripts(testCases, relay);
   const scripts: ScriptRecord[] = rendered.map((r, i) => ({
     id: uuidv4(),
     label: testCases[i]?.label ?? `Script ${i + 1}`,
