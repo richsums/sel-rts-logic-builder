@@ -15,6 +15,7 @@ import {
   type SettingsMap,
 } from '../rts/settings-extractor';
 import { computeOperateTime } from '../rts/operate-time';
+import { isTripWordBit as _isTripWordBit } from './protection';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -37,6 +38,12 @@ export interface NodeDisplayInfo {
   settings: DisplaySetting[];
   /** True if the user can click to toggle this node's logical state. */
   toggleable: boolean;
+  /**
+   * True if this is a trip word bit (e.g. 50P1T, 51G1T).
+   * Trip word bits are computed — not directly user-toggleable — and
+   * receive an amber/gold border to distinguish them from pickup bits.
+   */
+  isTripWordBit?: boolean;
   /** Timer PU time in seconds (used to drive the arc animation). */
   timerPuSeconds?: number;
   /** Timer DO time in seconds. */
@@ -277,9 +284,11 @@ export function extractDisplaySettings(
 
   // ── Protection element ────────────────────────────────────────────────────
   const protInfo = buildProtectionInfo(nodeId, tag, map);
+  const isTWB = _isTripWordBit(nodeId);
   return {
-    kind:      'protection',
-    toggleable: true,
+    kind:         'protection',
+    toggleable:   !isTWB,   // T-bits are computed, not user-toggleable
+    isTripWordBit: isTWB,
     ...protInfo,
   };
 }

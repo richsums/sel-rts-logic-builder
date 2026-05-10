@@ -1,0 +1,348 @@
+/**
+ * @module graph/buildReactFlow
+ * Converts a DependencyGraph into React Flow nodes and edges.
+ *
+ * Improvements over the legacy buildLayout in GraphViewer.tsx:
+ *  - Gate signal nodes use SVG symbols (andGate / orGate / notGate / edgeGate)
+ *  - Complex expressions get AST-decomposed into intermediate gate nodes placed
+ *    between the input signals and the target signal node
+ *  - Trip word bit (T-bit) protection nodes get amber border styling via
+ *    NodeDisplayInfo.isTripWordBit
+ */
+
+import { MarkerType, Position, type Node, type Edge } from 'reactflow';
+import type { DependencyGraph } from '../selogic/graph';
+import type { ParsedRelaySettings } from '../relay-adapters/common/types';
+import { parseExpression } from '../selogic/parser';
+import type { ASTNode, BinaryOpNode } from '../selogic/ast';
+import { extractDisplaySettings, type NodeDisplayInfo } from './displaySettings';
+import type { GraphNodeData } from './nodes';
+import type { GateNodeData, GateType } from './nodes';
+import type { AnimatedLogicEdgeData } from './edges';
+import type { SignalStates } from './propagate';
+
+// ─── Layout constants ─────────────────────────────────────────────────────────
+
+export const NODE_H_GAP    = 220;   // horizontal gap between depth columns
+export const NODE_V_GAP    = 120;   // vertical gap between nodes in same column
+export const GATE_H_OFFSET = 90;    // x-offset per gate level (right → left)
+
+// ─── Internal helpers ─────────────────────────────────────────────────────────
+
+function reactFlowNodeType(info: NodeDisplayInfo): string {
+  switch (info.kind) {
+    case 'protection': return 'protectionElement';
+    case 'timer':      return 'timerNode';
+    case 'latch':      return 'latchNode';
+    case 'gate':       return 'logicGateNode';
+    case 'input':      return 'inputSignalNode';
+    case 'trip':       return 'tripOutputNode';
+    default:           return 'logicGateNode';
+  }
+}
+
+function binaryOpToGateType(op: string): GateType {
+  if (op === 'OR') return 'or';
+  return 'and'; // AND and XOR both map to AND symbol (XOR is rare in SEL)
+}
+
+function unaryOpToGateType(op: string): GateType {
+  return op === 'EDGE' ? 'edge' : 'not';
+}
+
+function gateNodeType(gt: GateType): string {
+  return `${gt}Gate`;
+}
+
+// ─── AST decomposition context ────────────────────────────────────────────────
+
+interface DecompCtx {
+  gateNodes:    Node<GateNodeData>[];
+  gateEdges:    Edge<AnimatedLogicEdgeData>[];
+  signalStates: SignalStates;
+  seenEdgeIds:  Set<string>;
+  counter:      { n: number };
+}
+
+/**
+ * Recursively decomposes an AST subtree into intermediate gate nodes.
+ *
+ * Returns the ID of the node/gate whose output should be wired as input
+ * to the parent gate (or the final signal node).
+ *
+ * Leaf (Operand) → returns the signal name directly.
+ * Compound (BinaryOp / UnaryOp) → creates a gate node and returns its ID.
+ */
+function decomposeSubtree(
+  ast:      ASTNode,
+  parentId: string,
+  x:        number,
+  y:        number,
+  ctx:      DecompCtx,
+): string {
+  // ── Leaf nodes ────────────────────────────────────────────────────────────
+  if (ast.type === 'Operand') return ast.name;
+  if (ast.type === 'Literal') return `__lit_${ast.value}__`;
+
+  const gateId = `g_${parentId}_${ctx.counter.n++}`;
+
+  // ── UnaryOp (NOT / EDGE) ──────────────────────────────────────────────────
+  if (ast.type === 'UnaryOp') {
+    const gt      = unaryOpToGateType(ast.op);
+    const inputId = decomposeSubtree(ast.operand, gateId, x - GATE_H_OFFSET, y, ctx);
+
+    ctx.gateNodes.push(makeGateNode(gateId, gt, 1, x, y, ctx.signalStates[inputId] ?? 0));
+    pushGateEdge(inputId, 'a', gateId, ctx);
+    return gateId;
+  }
+
+  // ── BinaryOp (AND / OR / XOR) ─────────────────────────────────────────────
+  const bop   = ast as BinaryOpNode;
+  const gt    = binaryOpToGateType(bop.op);
+  const leftId  = decomposeSubtree(bop.left,  gateId, x - GATE_H_OFFSET, y - 28, ctx);
+  const rightId = decomposeSubtree(bop.right, gateId, x - GATE_H_OFFSET, y + 28, ctx);
+
+  const leftSt  = (ctx.signalStates[leftId]  ?? 0) as 0 | 1;
+  const rightSt = (ctx.signalStates[rightId] ?? 0) as 0 | 1;
+  const outSt: 0 | 1 = gt === 'or'
+    ? (leftSt === 1 || rightSt === 1 ? 1 : 0)
+    : (leftSt === 1 && rightSt === 1 ? 1 : 0);
+
+  ctx.gateNodes.push(makeGateNode(gateId, gt, 2, x, y, outSt));
+  pushGateEdge(leftId,  'a', gateId, ctx);
+  pushGateEdge(rightId, 'b', gateId, ctx);
+  return gateId;
+}
+
+function makeGateNode(
+  id: string, gt: GateType, inputCount: 1 | 2,
+  x: number, y: number, signalState: 0 | 1,
+): Node<GateNodeData> {
+  return {
+    id,
+    type:           gateNodeType(gt),
+    position:       { x, y },
+    sourcePosition: Position.Right,
+    targetPosition: Position.Left,
+    data: { gateType: gt, inputCount, signalState, animState: 'idle' },
+  };
+}
+
+function pushGateEdge(
+  source: string, sourceHandle: string, target: string, ctx: DecompCtx,
+): void {
+  // Skip literal placeholders
+  if (source.startsWith('__lit_')) return;
+  const eid = `${source}_${sourceHandle}->${target}`;
+  if (ctx.seenEdgeIds.has(eid)) return;
+  ctx.seenEdgeIds.add(eid);
+  ctx.gateEdges.push({
+    id:           eid,
+    source,
+    sourceHandle,
+    target,
+    type:         'animatedLogic',
+    markerEnd:    { type: MarkerType.ArrowClosed, width: 8, height: 8, color: '#94a3b8' },
+    data:         { state: (ctx.signalStates[source] ?? 0) as 0 | 1, isNot: false, pulsing: false },
+  });
+}
+
+// ─── Main layout builder ──────────────────────────────────────────────────────
+
+/**
+ * Build the complete React Flow node + edge arrays from a DependencyGraph.
+ *
+ * Signal nodes are positioned in depth columns (inputs left, trip outputs right).
+ * For signal nodes with complex equations (BinaryOp / UnaryOp at the root),
+ * intermediate gate nodes are inserted between their inputs and themselves.
+ *
+ * @param graph          The dependency graph (from buildDependencyGraph)
+ * @param relay          Parsed relay settings (null → defaults / blank display)
+ * @param signalStates   Current signal states for colouring
+ * @param onToggle       Toggle callback for user-interactive nodes
+ */
+export function buildReactFlowLayout(
+  graph:        DependencyGraph,
+  relay:        ParsedRelaySettings | null,
+  signalStates: SignalStates,
+  onToggle:     (nodeId: string, value: 0 | 1) => void,
+): { nodes: Node[]; edges: Edge[] } {
+
+  // ── Assign column positions ────────────────────────────────────────────────
+  const depthGroups = new Map<number, string[]>();
+  for (const [id, node] of graph.nodes) {
+    const d = node.depth;
+    if (!depthGroups.has(d)) depthGroups.set(d, []);
+    depthGroups.get(d)!.push(id);
+  }
+  const depths = Array.from(depthGroups.keys()).sort((a, b) => a - b);
+  const posOf  = new Map<string, { x: number; y: number }>();
+
+  for (const depth of depths) {
+    const ids = depthGroups.get(depth)!.sort();
+    ids.forEach((id, idx) => {
+      posOf.set(id, {
+        x: depth * NODE_H_GAP,
+        y: (idx - (ids.length - 1) / 2) * NODE_V_GAP,
+      });
+    });
+  }
+
+  // ── Shared decomposition context ──────────────────────────────────────────
+  const ctx: DecompCtx = {
+    gateNodes:    [],
+    gateEdges:    [],
+    signalStates,
+    seenEdgeIds:  new Set<string>(),
+    counter:      { n: 0 },
+  };
+
+  const signalNodes: Node[] = [];
+  const signalEdges: Edge[] = [];
+  const seenSignalEdgeIds = new Set<string>();
+
+  // ── Build signal nodes + wire edges ───────────────────────────────────────
+  for (const [id, gn] of graph.nodes) {
+    const pos         = posOf.get(id) ?? { x: 0, y: 0 };
+    const displayInfo = extractDisplaySettings(id, graph, relay);
+
+    signalNodes.push({
+      id,
+      type:           reactFlowNodeType(displayInfo),
+      position:       pos,
+      sourcePosition: Position.Right,
+      targetPosition: Position.Left,
+      data: {
+        nodeId:      id,
+        displayInfo,
+        signalState: (signalStates[id] ?? 0) as 0 | 1,
+        animState:   'idle',
+        onToggle,
+      } as GraphNodeData,
+    });
+
+    const expr = gn.equation?.expression ?? '';
+    const ast  = expr ? parseExpression(expr) : null;
+
+    if (ast && (ast.type === 'BinaryOp' || ast.type === 'UnaryOp')) {
+      // ── Complex equation: decompose AST into gate nodes ──────────────────
+      // Gate root sits one step to the left of the target signal node
+      const gateRootId = decomposeSubtree(
+        ast, id,
+        pos.x - GATE_H_OFFSET,
+        pos.y,
+        ctx,
+      );
+
+      // Wire the top-level gate's output to the signal node
+      const eid = `${gateRootId}->${id}`;
+      if (!seenSignalEdgeIds.has(eid)) {
+        seenSignalEdgeIds.add(eid);
+        signalEdges.push({
+          id:        eid,
+          source:    gateRootId,
+          target:    id,
+          type:      'animatedLogic',
+          markerEnd: { type: MarkerType.ArrowClosed, width: 10, height: 10, color: '#94a3b8' },
+          data:      {
+            state:   (signalStates[id] ?? 0) as 0 | 1,
+            isNot:   false,
+            pulsing: false,
+          },
+        });
+      }
+    } else {
+      // ── Simple / no equation: direct dependency edges ─────────────────────
+      for (const dep of gn.dependencies) {
+        const isNot = expr.toUpperCase().includes(`!${dep.toUpperCase()}`);
+        const eid   = `${dep}->${id}`;
+        if (!seenSignalEdgeIds.has(eid)) {
+          seenSignalEdgeIds.add(eid);
+          signalEdges.push({
+            id:        eid,
+            source:    dep,
+            target:    id,
+            type:      'animatedLogic',
+            markerEnd: { type: MarkerType.ArrowClosed, width: 10, height: 10, color: '#94a3b8' },
+            data:      {
+              state:   (signalStates[dep] ?? 0) as 0 | 1,
+              isNot,
+              pulsing: false,
+            },
+          });
+        }
+      }
+    }
+  }
+
+  // ── Merge gate nodes — deduplicate by ID ──────────────────────────────────
+  const seenGateIds = new Set<string>();
+  const dedupedGateNodes: Node[] = [];
+  for (const gn of ctx.gateNodes) {
+    if (!seenGateIds.has(gn.id)) {
+      seenGateIds.add(gn.id);
+      dedupedGateNodes.push(gn as Node);
+    }
+  }
+
+  const allNodes = [...signalNodes, ...dedupedGateNodes];
+  const allEdges = [...signalEdges, ...ctx.gateEdges];
+
+  return { nodes: allNodes, edges: allEdges };
+}
+
+// ─── State updaters ───────────────────────────────────────────────────────────
+
+/**
+ * Patch node data with fresh signal states + animation states.
+ * Gate nodes (IDs starting with 'g_') are left unchanged in v1
+ * since their state is derived and would require re-running decomposeSubtree.
+ */
+export function applySignalStatesToLayout(
+  nodes:        Node[],
+  signalStates: SignalStates,
+  flashingNodes: Record<string, string>,
+): Node[] {
+  return nodes.map(n => {
+    // Gate nodes: keep existing state
+    if (n.id.startsWith('g_')) return n;
+    return {
+      ...n,
+      data: {
+        ...n.data,
+        signalState: (signalStates[n.id] ?? 0) as 0 | 1,
+        animState:   flashingNodes[n.id] ?? 'idle',
+      },
+    };
+  });
+}
+
+/**
+ * Patch edge data with fresh signal states + pulsing flags.
+ * Gate edges (source or target starting with 'g_') are left unchanged.
+ */
+export function applyEdgeStatesToLayout(
+  edges:         Edge[],
+  signalStates:  SignalStates,
+  pulsingEdgeIds: string[],
+  graph:         DependencyGraph,
+): Edge[] {
+  const pulsingSet = new Set(pulsingEdgeIds);
+  return edges.map(e => {
+    // Gate edges: just update pulsing
+    if (e.source.startsWith('g_') || e.target.startsWith('g_')) {
+      return { ...e, data: { ...e.data, pulsing: pulsingSet.has(e.id) } };
+    }
+    const gn    = graph.nodes.get(e.target);
+    const expr  = gn?.equation?.expression ?? '';
+    const isNot = expr.toUpperCase().includes(`!${e.source.toUpperCase()}`);
+    return {
+      ...e,
+      data: {
+        state:   (signalStates[e.source] ?? 0) as 0 | 1,
+        isNot,
+        pulsing: pulsingSet.has(e.id),
+      },
+    };
+  });
+}

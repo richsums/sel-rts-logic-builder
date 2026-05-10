@@ -44,8 +44,10 @@ function stateGlow(state: 0 | 1, animState: string): React.CSSProperties {
   return {};
 }
 
-function stateBorderColor(state: 0 | 1, kind: string): string {
+function stateBorderColor(state: 0 | 1, kind: string, isTripWordBit?: boolean): string {
   if (kind === 'trip') return state === 1 ? '#ef4444' : '#f87171';
+  // Trip word bits get amber/gold border — computed, not user-toggleable
+  if (isTripWordBit) return state === 1 ? '#f59e0b' : '#fbbf24';
   return state === 1 ? '#00ff88' : '#94a3b8';
 }
 
@@ -117,12 +119,16 @@ const outputHandle = <Handle type="source" position={Position.Right} style={{ ba
 
 export function ProtectionElementNode({ id, data }: NodeProps<GraphNodeData>) {
   const { displayInfo, signalState, animState, onToggle } = data;
-  const border = stateBorderColor(signalState, 'protection');
+  const isTWB   = displayInfo.isTripWordBit ?? false;
+  const border  = stateBorderColor(signalState, 'protection', isTWB);
+  const glowStyle = isTWB && signalState === 1
+    ? { boxShadow: '0 0 0 2px #f59e0b, 0 0 12px 4px #f59e0b44' }
+    : stateGlow(signalState, animState);
 
   return (
     <div
       className="rounded-lg bg-white text-slate-800 min-w-[140px] max-w-[180px] transition-shadow duration-200"
-      style={{ border: `2px solid ${border}`, padding: '6px 10px', ...stateGlow(signalState, animState) }}
+      style={{ border: `2px solid ${border}`, padding: '6px 10px', ...glowStyle }}
     >
       {inputHandle}
       {/* Header */}
@@ -132,8 +138,14 @@ export function ProtectionElementNode({ id, data }: NodeProps<GraphNodeData>) {
             {displayInfo.icon} {id}
           </div>
           <div className="text-xs text-slate-400 truncate leading-tight">{displayInfo.subtitle}</div>
+          {isTWB && (
+            <div className="text-xs font-semibold text-amber-600 leading-tight">Trip Word Bit</div>
+          )}
         </div>
-        <TogglePill nodeId={id} state={signalState} onToggle={onToggle} />
+        {displayInfo.toggleable
+          ? <TogglePill nodeId={id} state={signalState} onToggle={onToggle} />
+          : <ComputedBadge state={signalState} />
+        }
       </div>
       <SettingsRows settings={displayInfo.settings} />
       {outputHandle}
@@ -324,6 +336,150 @@ export function TripOutputNode({ id, data }: NodeProps<GraphNodeData>) {
   );
 }
 
+// ─── LogicGateSymbolNode ──────────────────────────────────────────────────────
+//
+// Renders an IEEE-style SVG gate symbol.  Gate nodes are purely visual
+// intermediates (AND/OR/NOT/EDGE) — they represent sub-expressions from the
+// AST decomposition and are never user-toggleable.
+//
+// Gate colour palette (matches feature spec):
+//   AND  — cyan   #00d4ff
+//   OR   — purple #9966ff
+//   NOT  — amber  #ffaa00
+//   EDGE — bright cyan #00ffff
+
+export type GateType = 'and' | 'or' | 'not' | 'edge';
+
+export interface GateNodeData {
+  gateType:    GateType;
+  /** Number of input signals connected (1 for NOT/EDGE, 2 for AND/OR). */
+  inputCount:  1 | 2;
+  signalState: 0 | 1;
+  animState:   string;
+}
+
+const GATE_COLORS: Record<GateType, string> = {
+  and:  '#00d4ff',
+  or:   '#9966ff',
+  not:  '#ffaa00',
+  edge: '#00ffff',
+};
+
+const GATE_LABELS: Record<GateType, string> = {
+  and:  'AND',
+  or:   'OR',
+  not:  'NOT',
+  edge: '↑EDGE',
+};
+
+/** SVG body for each gate type.  All viewBox "0 0 48 32". */
+function GateShape({ type, active }: { type: GateType; active: boolean }) {
+  const color = GATE_COLORS[type];
+  const fill  = active ? `${color}22` : 'transparent';
+  const stroke = color;
+
+  switch (type) {
+    // AND gate — flat left, semicircle right
+    case 'and':
+      return (
+        <path
+          d="M4,4 L22,4 A12,12 0 0,1 22,28 L4,28 Z"
+          fill={fill} stroke={stroke} strokeWidth="2.5" strokeLinejoin="round"
+        />
+      );
+
+    // OR gate — concave left, pointed right
+    case 'or':
+      return (
+        <path
+          d="M4,4 Q14,16 4,28 Q18,24 30,16 Q18,8 4,4 Z"
+          fill={fill} stroke={stroke} strokeWidth="2.5" strokeLinejoin="round"
+        />
+      );
+
+    // NOT gate — triangle + bubble
+    case 'not':
+      return (
+        <>
+          <path
+            d="M4,4 L28,16 L4,28 Z"
+            fill={fill} stroke={stroke} strokeWidth="2.5" strokeLinejoin="round"
+          />
+          <circle cx="31" cy="16" r="3" fill={fill} stroke={stroke} strokeWidth="2" />
+        </>
+      );
+
+    // EDGE detector — rising-edge waveform icon
+    case 'edge':
+      return (
+        <polyline
+          points="4,24 16,24 16,8 28,8 28,24 38,24"
+          fill="none" stroke={stroke} strokeWidth="2.5"
+          strokeLinecap="round" strokeLinejoin="round"
+        />
+      );
+  }
+}
+
+export function LogicGateSymbolNode({ id, data }: NodeProps<GateNodeData>) {
+  const { gateType, inputCount, signalState, animState } = data;
+  const color  = GATE_COLORS[gateType];
+  const active = signalState === 1;
+  const glowStyle = active
+    ? { boxShadow: `0 0 0 2px ${color}, 0 0 10px 3px ${color}44` }
+    : animState === 'blocked'
+      ? { boxShadow: '0 0 0 2px #f97316, 0 0 8px 3px #f9731644' }
+      : {};
+
+  // Input handle positions: centred for 1 input, staggered for 2
+  const inputHandleA = inputCount === 2
+    ? { top: '33%' }
+    : { top: '50%', transform: 'translateY(-50%)' };
+  const inputHandleB = { top: '67%' };
+
+  return (
+    <div
+      className="relative flex items-center justify-center transition-shadow duration-200"
+      style={{ width: 64, height: 44, ...glowStyle }}
+    >
+      {/* Input handles */}
+      <Handle
+        type="target" position={Position.Left} id="a"
+        style={{ background: color, width: 7, height: 7, ...inputHandleA }}
+      />
+      {inputCount === 2 && (
+        <Handle
+          type="target" position={Position.Left} id="b"
+          style={{ background: color, width: 7, height: 7, ...inputHandleB }}
+        />
+      )}
+
+      {/* Gate SVG body */}
+      <svg viewBox="0 0 48 32" width={56} height={38} style={{ overflow: 'visible' }}>
+        <GateShape type={gateType} active={active} />
+
+        {/* Gate label inside shape */}
+        <text
+          x="14" y="19"
+          textAnchor="middle"
+          fontSize="7"
+          fontFamily="monospace"
+          fontWeight="bold"
+          fill={active ? GATE_COLORS[gateType] : '#94a3b8'}
+        >
+          {GATE_LABELS[gateType]}
+        </text>
+      </svg>
+
+      {/* Output handle */}
+      <Handle
+        type="source" position={Position.Right}
+        style={{ background: color, width: 7, height: 7, top: '50%', transform: 'translateY(-50%)' }}
+      />
+    </div>
+  );
+}
+
 // ─── Node type registry ───────────────────────────────────────────────────────
 
 export const NODE_TYPES = {
@@ -333,4 +489,9 @@ export const NODE_TYPES = {
   logicGateNode:     LogicGateNode,
   inputSignalNode:   InputSignalNode,
   tripOutputNode:    TripOutputNode,
+  // Logic gate symbol nodes (AST-decomposed)
+  andGate:           LogicGateSymbolNode,
+  orGate:            LogicGateSymbolNode,
+  notGate:           LogicGateSymbolNode,
+  edgeGate:          LogicGateSymbolNode,
 };

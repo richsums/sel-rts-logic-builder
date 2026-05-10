@@ -24,8 +24,6 @@ import ReactFlow, {
   type NodeChange,
   type EdgeChange,
   type Viewport,
-  MarkerType,
-  Position,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { GitBranch, RotateCcw, Zap } from 'lucide-react';
@@ -33,7 +31,11 @@ import { useProjectStore } from '../store/project';
 import { useUIStore, type AnimationSpeed } from '../store/ui';
 import { NODE_TYPES, type GraphNodeData } from '../graph/nodes';
 import { EDGE_TYPES, type AnimatedLogicEdgeData } from '../graph/edges';
-import { extractDisplaySettings, type NodeDisplayInfo } from '../graph/displaySettings';
+import {
+  buildReactFlowLayout,
+  applySignalStatesToLayout,
+  applyEdgeStatesToLayout,
+} from '../graph/buildReactFlow';
 import {
   propagate,
   initialSignalStates,
@@ -43,125 +45,6 @@ import {
 import { buildAnimationSequence } from '../graph/animator';
 import type { DependencyGraph } from '../selogic/graph';
 import type { ParsedRelaySettings } from '../relay-adapters/common/types';
-
-// ─── Layout constants ─────────────────────────────────────────────────────────
-
-const NODE_H_GAP = 220;
-const NODE_V_GAP = 120;
-
-// ─── Node type classifier ─────────────────────────────────────────────────────
-
-function reactFlowNodeType(info: NodeDisplayInfo): string {
-  switch (info.kind) {
-    case 'protection': return 'protectionElement';
-    case 'timer':      return 'timerNode';
-    case 'latch':      return 'latchNode';
-    case 'gate':       return 'logicGateNode';
-    case 'input':      return 'inputSignalNode';
-    case 'trip':       return 'tripOutputNode';
-    default:           return 'logicGateNode';
-  }
-}
-
-// ─── Layout builder ───────────────────────────────────────────────────────────
-
-function buildLayout(
-  graph: DependencyGraph,
-  relay: ParsedRelaySettings | null,
-  signalStates: SignalStates,
-  onToggle: (nodeId: string, value: 0 | 1) => void,
-): { nodes: Node<GraphNodeData>[]; edges: Edge<AnimatedLogicEdgeData>[] } {
-  const nodes: Node<GraphNodeData>[] = [];
-  const edges: Edge<AnimatedLogicEdgeData>[] = [];
-
-  const depthGroups = new Map<number, string[]>();
-  for (const [id, node] of graph.nodes) {
-    const d = node.depth;
-    if (!depthGroups.has(d)) depthGroups.set(d, []);
-    depthGroups.get(d)!.push(id);
-  }
-
-  const depths = Array.from(depthGroups.keys()).sort((a, b) => a - b);
-
-  for (const depth of depths) {
-    const ids = depthGroups.get(depth)!.sort();
-    ids.forEach((id, idx) => {
-      const gn          = graph.nodes.get(id)!;
-      const displayInfo = extractDisplaySettings(id, graph, relay);
-      const x = depth * NODE_H_GAP;
-      const y = (idx - (ids.length - 1) / 2) * NODE_V_GAP;
-
-      nodes.push({
-        id,
-        type:           reactFlowNodeType(displayInfo),
-        position:       { x, y },
-        sourcePosition: Position.Right,
-        targetPosition: Position.Left,
-        data: {
-          nodeId:      id,
-          displayInfo,
-          signalState: signalStates[id] ?? 0,
-          animState:   'idle',
-          onToggle,
-        },
-      });
-
-      for (const dep of gn.dependencies) {
-        const expr   = gn.equation?.expression ?? '';
-        const isNot  = expr.toUpperCase().includes(`!${dep.toUpperCase()}`);
-        edges.push({
-          id:     `${dep}->${id}`,
-          source: dep,
-          target: id,
-          type:   'animatedLogic',
-          markerEnd: { type: MarkerType.ArrowClosed, width: 10, height: 10, color: '#94a3b8' },
-          data: { state: signalStates[dep] ?? 0, isNot, pulsing: false },
-        });
-      }
-    });
-  }
-
-  return { nodes, edges };
-}
-
-// ─── State sync helpers ───────────────────────────────────────────────────────
-
-function applySignalStates(
-  nodes: Node<GraphNodeData>[],
-  signalStates: SignalStates,
-  flashingNodes: Record<string, string>,
-): Node<GraphNodeData>[] {
-  return nodes.map(n => ({
-    ...n,
-    data: {
-      ...n.data,
-      signalState: signalStates[n.id] ?? 0,
-      animState:   flashingNodes[n.id] ?? 'idle',
-    },
-  }));
-}
-
-function applyEdgeStates(
-  edges: Edge<AnimatedLogicEdgeData>[],
-  signalStates: SignalStates,
-  pulsingEdgeIds: string[],
-  graph: DependencyGraph,
-): Edge<AnimatedLogicEdgeData>[] {
-  const pulsingSet = new Set(pulsingEdgeIds);
-  return edges.map(e => {
-    const gn   = graph.nodes.get(e.target);
-    const expr = gn?.equation?.expression ?? '';
-    const isNot = expr.toUpperCase().includes(`!${e.source.toUpperCase()}`);
-    return {
-      ...e,
-      data: {
-        state:   signalStates[e.source] ?? 0,
-        isNot,
-        pulsing: pulsingSet.has(e.id),
-      },
-    };
-  });
-}
 
 // ─── Inner component ──────────────────────────────────────────────────────────
 
@@ -237,14 +120,14 @@ function GraphViewerInner() {
 
     // Restore stored layout for same project
     if (!isNewProject && storedNodes.length > 0) {
-      setNodes(applySignalStates(storedNodes, states, flashingNodes));
-      setEdges(applyEdgeStates(storedEdges, states, pulsingEdgeIds, graph));
+      setNodes(applySignalStatesToLayout(storedNodes, states, flashingNodes));
+      setEdges(applyEdgeStatesToLayout(storedEdges, states, pulsingEdgeIds, graph));
       setViewport(storedViewport);
       return;
     }
 
     // Build fresh layout
-    const { nodes: n, edges: e } = buildLayout(graph, relay, states, handleToggle);
+    const { nodes: n, edges: e } = buildReactFlowLayout(graph, relay, states, handleToggle);
     setNodes(n);
     setEdges(e);
     setGraphLayout(n, e, activeProjectId ?? '');
@@ -254,8 +137,8 @@ function GraphViewerInner() {
   // ── Sync signal states → node/edge data ───────────────────────────────────
   useEffect(() => {
     if (!graph || nodes.length === 0) return;
-    setNodes(prev => applySignalStates(prev, signalStates, flashingNodes));
-    setEdges(prev => applyEdgeStates(prev, signalStates, pulsingEdgeIds, graph));
+    setNodes(prev => applySignalStatesToLayout(prev, signalStates, flashingNodes));
+    setEdges(prev => applyEdgeStatesToLayout(prev, signalStates, pulsingEdgeIds, graph));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signalStates, flashingNodes, pulsingEdgeIds]);
 
@@ -296,7 +179,7 @@ function GraphViewerInner() {
     const states = initialSignalStates(graph);
     resetSignalStates();
     clearAnimations();
-    const { nodes: n, edges: e } = buildLayout(graph, relay, states, handleToggle);
+    const { nodes: n, edges: e } = buildReactFlowLayout(graph, relay, states, handleToggle);
     setNodes(n);
     setEdges(e);
     setGraphLayout(n, e, activeProjectId ?? '');
