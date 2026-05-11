@@ -26,7 +26,21 @@ export interface GraphNodeData {
   animState: string;
   /** Timer fill progress 0.0–1.0 (only used by timerNode). */
   timerProgress?: number;
+  /** Timer phase (only used by timerNode for arc coloring). */
+  timerPhase?: string;
+  /** Countdown text (only used by timerNode). */
+  countdownText?: string;
   onToggle: (nodeId: string, newValue: 0 | 1) => void;
+}
+
+// ─── Output contact node data ─────────────────────────────────────────────────
+
+export interface OutputContactNodeData {
+  nodeId: string;
+  /** The SELogic expression this contact is driven by (e.g. "TR"). */
+  expression: string;
+  signalState: 0 | 1;
+  animState: string;
 }
 
 // ─── Style helpers ────────────────────────────────────────────────────────────
@@ -155,17 +169,30 @@ export function ProtectionElementNode({ id, data }: NodeProps<GraphNodeData>) {
 
 // ─── TimerNode ────────────────────────────────────────────────────────────────
 
+/** Returns the arc stroke color based on timer phase. */
+function arcStrokeColor(phase: string, pct: number): string {
+  if (phase === 'timing-pu') return '#ffaa00';   // amber while counting up
+  if (phase === 'tripped')   return '#00ff88';   // green when tripped/held
+  if (phase === 'timing-do') return '#888888';   // gray while draining DO
+  return pct > 0 ? '#3b82f6' : '#cbd5e1';        // fallback blue / light gray
+}
+
 export function TimerNode({ id, data }: NodeProps<GraphNodeData>) {
-  const { displayInfo, signalState, animState, timerProgress = 0 } = data;
+  const { displayInfo, signalState, animState, timerProgress = 0, timerPhase = 'idle', countdownText = '' } = data;
   const border = stateBorderColor(signalState, 'timer');
   const pct    = Math.min(1, Math.max(0, timerProgress));
 
-  // SVG arc parameters
+  // SVG arc parameters (stroke-dasharray/dashoffset approach — no CSS animation)
   const r  = 14;
   const cx = 18;
   const cy = 18;
   const circumference = 2 * Math.PI * r;
   const dashOffset    = circumference * (1 - pct);
+  const arcColor      = arcStrokeColor(timerPhase, pct);
+
+  // Display text inside arc
+  const arcText = timerPhase === 'tripped' ? 'TIMED' : countdownText || `${Math.round(pct * 100)}%`;
+  const arcTextShort = arcText.length > 6 ? arcText.slice(0, 5) + '…' : arcText;
 
   return (
     <div
@@ -174,22 +201,21 @@ export function TimerNode({ id, data }: NodeProps<GraphNodeData>) {
     >
       {inputHandle}
       <div className="flex items-center gap-2 mb-1">
-        {/* Timer arc indicator */}
+        {/* Timer arc indicator (SVG stroke-dasharray, no CSS animation) */}
         <svg width="36" height="36" className="flex-shrink-0">
           <circle cx={cx} cy={cy} r={r} fill="none" stroke="#e2e8f0" strokeWidth="3" />
           <circle
             cx={cx} cy={cy} r={r}
             fill="none"
-            stroke={pct > 0 ? '#3b82f6' : '#cbd5e1'}
+            stroke={arcColor}
             strokeWidth="3"
             strokeDasharray={circumference}
             strokeDashoffset={dashOffset}
             strokeLinecap="round"
             transform={`rotate(-90 ${cx} ${cy})`}
-            style={{ transition: 'stroke-dashoffset 0.1s linear' }}
           />
-          <text x={cx} y={cy + 4} textAnchor="middle" fontSize="9" fontFamily="monospace" fill="#475569">
-            {Math.round(pct * 100)}%
+          <text x={cx} y={cy + 4} textAnchor="middle" fontSize="7" fontFamily="monospace" fill="#475569">
+            {arcTextShort}
           </text>
         </svg>
         <div className="min-w-0 flex-1">
@@ -480,6 +506,69 @@ export function LogicGateSymbolNode({ id, data }: NodeProps<GateNodeData>) {
   );
 }
 
+// ─── OutputContactNode ────────────────────────────────────────────────────────
+//
+// Displays a physical output contact (OUT101, OUT201, etc.).
+// Shape: rectangular with relay contact symbol.
+// Color: dark bg, bright green border when asserted, gray when de-asserted.
+// NOT user-toggleable — purely computed from TR/ALARM/etc.
+
+export function OutputContactNode({ id, data }: NodeProps<OutputContactNodeData>) {
+  const { expression, signalState, animState } = data;
+  const isAsserted = signalState === 1;
+
+  const borderColor = isAsserted ? '#00ff88' : '#64748b';
+  const glowStyle   = isAsserted
+    ? { boxShadow: '0 0 0 2px #00ff88, 0 0 12px 4px #00ff8844' }
+    : {};
+  const animGlow    = animState === 'flash-on' || animState === 'trip-pulse'
+    ? { boxShadow: '0 0 0 2px #00ff88, 0 0 16px 6px #00ff8866' }
+    : glowStyle;
+
+  return (
+    <div
+      className="rounded-lg text-white min-w-[130px] max-w-[160px] transition-all duration-200"
+      style={{
+        background:  isAsserted ? '#0f2b1e' : '#1e293b',
+        border:      `2px solid ${borderColor}`,
+        padding:     '6px 10px',
+        ...animGlow,
+      }}
+    >
+      {inputHandle}
+      {/* Contact symbol row */}
+      <div className="flex items-center justify-between gap-1 mb-1">
+        <div className="min-w-0">
+          <div className="text-sm font-bold font-mono">{id}</div>
+          <div className="text-xs opacity-60 truncate">= {expression}</div>
+        </div>
+        {/* Relay contact symbol */}
+        <svg width="24" height="20" viewBox="0 0 24 20">
+          <line x1="2" y1="10" x2="8" y2="10" stroke={borderColor} strokeWidth="2" />
+          <line x1="16" y1="10" x2="22" y2="10" stroke={borderColor} strokeWidth="2" />
+          {isAsserted ? (
+            // Closed contact: horizontal bar
+            <line x1="8" y1="10" x2="16" y2="10" stroke={borderColor} strokeWidth="2" />
+          ) : (
+            // Open contact: diagonal bar
+            <line x1="8" y1="14" x2="16" y2="6" stroke={borderColor} strokeWidth="2" />
+          )}
+          <line x1="8" y1="6" x2="8" y2="14" stroke={borderColor} strokeWidth="1.5" />
+          <line x1="16" y1="6" x2="16" y2="14" stroke={borderColor} strokeWidth="1.5" />
+        </svg>
+      </div>
+      {/* Status badge */}
+      <div className={`text-xs font-bold px-1.5 py-0.5 rounded text-center ${
+        isAsserted
+          ? 'bg-green-500 text-white'
+          : 'bg-slate-600 text-slate-300'
+      }`}>
+        {isAsserted ? '● CLOSED' : '○ OPEN'}
+      </div>
+    </div>
+  );
+}
+
 // ─── Node type registry ───────────────────────────────────────────────────────
 
 export const NODE_TYPES = {
@@ -489,6 +578,7 @@ export const NODE_TYPES = {
   logicGateNode:     LogicGateNode,
   inputSignalNode:   InputSignalNode,
   tripOutputNode:    TripOutputNode,
+  outputContactNode: OutputContactNode,
   // Logic gate symbol nodes (AST-decomposed)
   andGate:           LogicGateSymbolNode,
   orGate:            LogicGateSymbolNode,

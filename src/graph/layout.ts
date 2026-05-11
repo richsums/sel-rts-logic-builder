@@ -43,6 +43,151 @@ export const NODE_V_GAP = 120;
 /** Number of barycenter crossing-minimisation passes. */
 const BARY_PASSES = 3;
 
+/** Minimum horizontal gap between any two node bounding boxes (px). */
+export const MIN_H_GAP = 40;
+
+/** Minimum vertical gap between any two node bounding boxes (px). */
+export const MIN_V_GAP = 30;
+
+/** Minimum gap between logic gate nodes and adjacent element nodes (px). */
+export const GATE_NEIGHBOR_GAP = 20;
+
+/** Maximum collision resolution iterations. */
+const MAX_COLLISION_ITERS = 20;
+
+// ─── Node size constants ──────────────────────────────────────────────────────
+
+/** Width × height (px) for each node type. Used for collision detection. */
+export const NODE_SIZES: Record<string, { width: number; height: number }> = {
+  protectionElement: { width: 180, height: 160 },
+  timerNode:         { width: 160, height: 180 },
+  logicGateNode:     { width: 160, height:  80 },
+  logicGateSymbol:   { width:  60, height:  50 },
+  inputSignalNode:   { width: 140, height:  60 },
+  outputContactNode: { width: 160, height:  80 },
+  tripOutputNode:    { width: 200, height: 100 },
+  latchNode:         { width: 160, height:  80 },
+  default:           { width: 160, height:  80 },
+};
+
+/**
+ * Look up the size for a node by type ID or a canonical type string.
+ */
+export function nodeSizeForType(nodeType: string): { width: number; height: number } {
+  return NODE_SIZES[nodeType] ?? NODE_SIZES['default'];
+}
+
+// ─── Bounding box type ────────────────────────────────────────────────────────
+
+export interface BoundingBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+// ─── Collision detection ──────────────────────────────────────────────────────
+
+/**
+ * Check whether two bounding boxes overlap (with a margin added on all sides).
+ */
+function overlaps(a: BoundingBox, b: BoundingBox, margin = MIN_V_GAP): boolean {
+  return (
+    a.x < b.x + b.width  + margin &&
+    a.x + a.width  + margin > b.x &&
+    a.y < b.y + b.height + margin &&
+    a.y + a.height + margin > b.y
+  );
+}
+
+/**
+ * Detect collision pairs in a list of positioned nodes.
+ * Returns array of overlapping [idA, idB] pairs.
+ */
+export function detectCollisions(
+  positions: Map<string, { x: number; y: number }>,
+  sizes: Map<string, { width: number; height: number }>,
+  margin = MIN_V_GAP,
+): Array<[string, string]> {
+  const ids = Array.from(positions.keys());
+  const pairs: Array<[string, string]> = [];
+  for (let i = 0; i < ids.length; i++) {
+    for (let j = i + 1; j < ids.length; j++) {
+      const aId = ids[i];
+      const bId = ids[j];
+      const aPos  = positions.get(aId)!;
+      const aSize = sizes.get(aId) ?? NODE_SIZES['default'];
+      const bPos  = positions.get(bId)!;
+      const bSize = sizes.get(bId) ?? NODE_SIZES['default'];
+      const aBox: BoundingBox = { x: aPos.x, y: aPos.y, width: aSize.width, height: aSize.height };
+      const bBox: BoundingBox = { x: bPos.x, y: bPos.y, width: bSize.width, height: bSize.height };
+      if (overlaps(aBox, bBox, margin)) pairs.push([aId, bId]);
+    }
+  }
+  return pairs;
+}
+
+/**
+ * Resolve vertical collisions within a single tier.
+ * For every pair of overlapping nodes, push the lower one down.
+ * Iterates up to MAX_COLLISION_ITERS times until stable.
+ *
+ * @param tierIds   Node IDs in this tier (already in desired order).
+ * @param positions Mutable position map (y values will be updated in place).
+ * @param sizes     Node sizes map.
+ */
+export function resolveCollisionsInTier(
+  tierIds: string[],
+  positions: Map<string, { x: number; y: number }>,
+  sizes: Map<string, { width: number; height: number }>,
+): void {
+  for (let iter = 0; iter < MAX_COLLISION_ITERS; iter++) {
+    let anyFixed = false;
+    for (let i = 0; i < tierIds.length - 1; i++) {
+      const aId = tierIds[i];
+      const bId = tierIds[i + 1];
+      const aPos  = positions.get(aId);
+      const bPos  = positions.get(bId);
+      if (!aPos || !bPos) continue;
+      const aSize = sizes.get(aId) ?? NODE_SIZES['default'];
+      const bSize = sizes.get(bId) ?? NODE_SIZES['default'];
+
+      // Bottom edge of A  =  aPos.y + aSize.height / 2 (centred coords)
+      // Top edge of B     =  bPos.y - bSize.height / 2
+      const aBottom = aPos.y + aSize.height / 2;
+      const bTop    = bPos.y - bSize.height / 2;
+      const gap     = bTop - aBottom;
+
+      if (gap < MIN_V_GAP) {
+        // Push B down by the overlap amount
+        const push = MIN_V_GAP - gap;
+        positions.set(bId, { x: bPos.x, y: bPos.y + push });
+        anyFixed = true;
+      }
+    }
+    if (!anyFixed) break;
+  }
+}
+
+/**
+ * Re-centre a tier vertically around y=0 after collision resolution.
+ */
+export function recentreTier(
+  tierIds: string[],
+  positions: Map<string, { x: number; y: number }>,
+): void {
+  if (tierIds.length === 0) return;
+  const ys = tierIds.map(id => positions.get(id)?.y ?? 0);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const centre = (minY + maxY) / 2;
+  if (Math.abs(centre) < 0.5) return;  // already centred
+  for (const id of tierIds) {
+    const pos = positions.get(id);
+    if (pos) positions.set(id, { x: pos.x, y: pos.y - centre });
+  }
+}
+
 // ─── Tier identifiers ─────────────────────────────────────────────────────────
 
 export type Tier = 0 | 1 | 2 | 3 | 4 | 5 | 6;
@@ -253,7 +398,7 @@ export function computeLayout(graph: DependencyGraph): Map<string, LayoutPositio
     barycentrePass(tiers, graph, pass % 2 === 0 ? 'forward' : 'backward');
   }
 
-  // ── Step 4: Emit coordinates ──────────────────────────────────────────────
+  // ── Step 4: Emit initial coordinates (centre-based) ──────────────────────
   const positions = new Map<string, LayoutPosition>();
 
   for (const [tier, ids] of tiers) {
@@ -265,6 +410,33 @@ export function computeLayout(graph: DependencyGraph): Map<string, LayoutPositio
         tier,
       });
     });
+  }
+
+  // ── Step 5: Collision resolution per tier ─────────────────────────────────
+  // Build a sizes map (use default sizes since we don't know node type here)
+  const sizesMap = new Map<string, { width: number; height: number }>();
+  for (const [id] of graph.nodes) {
+    sizesMap.set(id, NODE_SIZES['default']);
+  }
+
+  for (const [tier, ids] of tiers) {
+    if (ids.length <= 1) continue;
+
+    // Convert LayoutPosition to simple { x, y } map for the helper
+    const tierPositions = new Map<string, { x: number; y: number }>();
+    for (const id of ids) {
+      const p = positions.get(id)!;
+      tierPositions.set(id, { x: p.x, y: p.y });
+    }
+
+    resolveCollisionsInTier(ids, tierPositions, sizesMap);
+    recentreTier(ids, tierPositions);
+
+    // Write back
+    for (const id of ids) {
+      const p = tierPositions.get(id)!;
+      positions.set(id, { x: p.x, y: p.y, tier });
+    }
   }
 
   return positions;

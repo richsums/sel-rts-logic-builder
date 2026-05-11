@@ -58,8 +58,9 @@ export const DEMO_SEL351: ParsedRelaySettings = settings('SEL-351', 'FDR01', 'R3
     { k: '51G1TC', v: '51G1',                  l: 22 },
     { k: 'LT1S',   v: 'TR',                    l: 23 },
     { k: 'LT1R',   v: 'IN101',                 l: 24 },
-    { k: 'OUT101', v: 'LT1',                   l: 25 },
-    { k: 'ALARM',  v: '51PT + 50BF',           l: 26 },
+    { k: 'OUT101', v: 'TR',                    l: 25 },
+    { k: 'OUT201', v: 'ALARM',                  l: 26 },
+    { k: 'ALARM',  v: '51PT + 50BF',           l: 27 },
   ], F, 19),
 ], [
   eq('TR',     '51PT * !50BF * 52A',  'Trip (OC supervised by 52A, blocked by 50BF)', 'TRIP',       F, 20),
@@ -67,9 +68,10 @@ export const DEMO_SEL351: ParsedRelaySettings = settings('SEL-351', 'FDR01', 'R3
   eq('51G1TC', '51G1',                 'Ground OC Timer Control',                       'TIMER_IN',   F, 22),
   eq('LT1S',   'TR',                  'Latch 1 Set',                                    'LATCH_SET',  F, 23),
   eq('LT1R',   'IN101',               'Latch 1 Reset',                                  'LATCH_RESET',F, 24),
-  eq('OUT101', 'LT1',                 'Output 101',                                     'OUTPUT',     F, 25),
-  eq('ALARM',  '51PT + 50BF',         'Alarm',                                          'ALARM',      F, 26),
-], F, 30);
+  eq('OUT101', 'TR',                  'Output 101 (Trip)',                               'OUTPUT',     F, 25),
+  eq('OUT201', 'ALARM',               'Output 201 (Alarm)',                              'OUTPUT',     F, 26),
+  eq('ALARM',  '51PT + 50BF',         'Alarm',                                          'ALARM',      F, 27),
+], F, 32);
 
 // ─── SEL-411L LDR01 (line differential) ──────────────────────────────────────
 
@@ -124,8 +126,9 @@ export const DEMO_SEL421: ParsedRelaySettings = settings('SEL-421', 'DTR01', 'R5
     { k: 'LT1S',  v: 'TR',                                l: 24 },
     { k: 'LT1R',  v: '^IN101',                             l: 25 },
     { k: 'ALARM', v: '21P + 67P',                          l: 26 },
-    { k: 'OUT101',v: 'LT1',                                l: 27 },
-    { k: 'OUT102',v: 'TxWI',                               l: 28 },
+    { k: 'OUT101',v: 'TR',                                 l: 27 },
+    { k: 'OUT201',v: 'ALARM',                              l: 28 },
+    { k: 'OUT102',v: 'TxWI',                               l: 29 },
   ], D, 19),
 ], [
   eq('TR',    '(21P + 21G + 67P) * RxWI * !BLK',  'Trip (dist/dir supervised by RxWI, blocked by BLK)', 'TRIP',         D, 20),
@@ -135,9 +138,10 @@ export const DEMO_SEL421: ParsedRelaySettings = settings('SEL-421', 'DTR01', 'R5
   eq('LT1S',  'TR',                                  'Trip latch set',                                     'LATCH_SET',     D, 24),
   eq('LT1R',  '^IN101',                               'Trip latch reset (rising edge)',                     'RISING_EDGE',   D, 25),
   eq('ALARM', '21P + 67P',                            'Alarm (distance or directional pickup)',             'ALARM',         D, 26),
-  eq('OUT101','LT1',                                  'Trip output (latched)',                              'OUTPUT',        D, 27),
-  eq('OUT102','TxWI',                                 'Transmit POTT output',                              'OUTPUT',        D, 28),
-], D, 40);
+  eq('OUT101','TR',                                   'Trip output',                                        'OUTPUT',        D, 27),
+  eq('OUT201','ALARM',                                'Alarm output',                                       'OUTPUT',        D, 28),
+  eq('OUT102','TxWI',                                 'Transmit POTT output',                              'OUTPUT',        D, 29),
+], D, 41);
 
 // ─── SEL-451 DOR01 (distance + OC + SOTF) ────────────────────────────────────
 

@@ -59,6 +59,7 @@ function GraphViewerInner() {
     setSignalStates, resetSignalStates,
     setAnimationSpeed, setLastChangeCount,
     setPulsingEdgeIds, setFlashingNodes, clearAnimations,
+    clearTimerStates,
   } = useUIStore();
 
   const { setViewport } = useReactFlow();
@@ -114,6 +115,8 @@ function GraphViewerInner() {
     const states       = isNewProject ? initialSignalStates(graph) : signalStates;
 
     if (isNewProject) {
+      // Problem 5: clear ALL timer states, reset signals, clear animations on relay switch
+      clearTimerStates();
       resetSignalStates();
       clearAnimations();
     }
@@ -131,6 +134,11 @@ function GraphViewerInner() {
     setNodes(n);
     setEdges(e);
     setGraphLayout(n, e, activeProjectId ?? '');
+
+    // Apply 400ms smooth transition to new layout
+    setTimeout(() => {
+      setViewport({ x: 0, y: 0, zoom: 0.8 }, { duration: 400 });
+    }, 50);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graph, activeProjectId]);
 
@@ -177,6 +185,7 @@ function GraphViewerInner() {
     setResetConfirm(false);
     if (!graph) return;
     const states = initialSignalStates(graph);
+    clearTimerStates();
     resetSignalStates();
     clearAnimations();
     const { nodes: n, edges: e } = buildReactFlowLayout(graph, relay, states, handleToggle);
@@ -184,7 +193,7 @@ function GraphViewerInner() {
     setEdges(e);
     setGraphLayout(n, e, activeProjectId ?? '');
     setTimeout(() => setViewport({ x: 0, y: 0, zoom: 0.8 }, { duration: 400 }), 50);
-  }, [resetConfirm, graph, relay, resetSignalStates, clearAnimations,
+  }, [resetConfirm, graph, relay, clearTimerStates, resetSignalStates, clearAnimations,
       handleToggle, setNodes, setEdges, setGraphLayout, activeProjectId, setViewport]);
 
   useEffect(() => () => {

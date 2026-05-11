@@ -16,11 +16,37 @@ import type { ParsedRelaySettings } from '../relay-adapters/common/types';
 import { parseExpression } from '../selogic/parser';
 import type { ASTNode, BinaryOpNode } from '../selogic/ast';
 import { extractDisplaySettings, type NodeDisplayInfo } from './displaySettings';
-import type { GraphNodeData } from './nodes';
+import type { GraphNodeData, OutputContactNodeData } from './nodes';
 import type { GateNodeData, GateType } from './nodes';
 import type { AnimatedLogicEdgeData } from './edges';
 import type { SignalStates } from './propagate';
 import { isPickupBit, isTripWordBit, timerNodeId } from './protection';
+
+// ─── Output contact parsing ───────────────────────────────────────────────────
+
+/**
+ * Parse output contact assignments from relay settings groups.
+ * Looks for entries with keys matching OUTxxx pattern.
+ * Returns a map of output name → expression (e.g. "OUT101" → "TR").
+ */
+export function parseOutputContacts(relay: ParsedRelaySettings | null): Map<string, string> {
+  const result = new Map<string, string>();
+  if (!relay) return result;
+  for (const group of relay.settingGroups) {
+    for (const entry of group.entries) {
+      if (/^OUT\d+$/i.test(entry.key)) {
+        result.set(entry.key.toUpperCase(), entry.value);
+      }
+    }
+  }
+  // Also check logicEquations for OUTPUT type
+  for (const eq of relay.logicEquations) {
+    if (/^OUT\d+$/i.test(eq.label) && eq.functionType === 'OUTPUT') {
+      result.set(eq.label.toUpperCase(), eq.expression);
+    }
+  }
+  return result;
+}
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
 
@@ -30,7 +56,9 @@ export const GATE_H_OFFSET = 90;    // x-offset per gate level (right → left)
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
-function reactFlowNodeType(info: NodeDisplayInfo): string {
+function reactFlowNodeType(info: NodeDisplayInfo, nodeId: string): string {
+  // Output contacts (OUTxxx) get special node type regardless of display kind
+  if (/^OUT\d+$/i.test(nodeId)) return 'outputContactNode';
   switch (info.kind) {
     case 'protection': return 'protectionElement';
     case 'timer':      return 'timerNode';
@@ -278,10 +306,27 @@ export function buildReactFlowLayout(
   for (const [id, gn] of graph.nodes) {
     const pos         = posOf.get(id) ?? { x: 0, y: 0 };
     const displayInfo = extractDisplaySettings(id, graph, relay);
+    const nodeType    = reactFlowNodeType(displayInfo, id);
 
+    // Output contact nodes (OUTxxx) get OutputContactNodeData, not GraphNodeData
+    if (nodeType === 'outputContactNode') {
+      signalNodes.push({
+        id,
+        type:           'outputContactNode',
+        position:       pos,
+        sourcePosition: Position.Right,
+        targetPosition: Position.Left,
+        data: {
+          nodeId:      id,
+          expression:  gn.equation?.expression ?? id,
+          signalState: (signalStates[id] ?? 0) as 0 | 1,
+          animState:   'idle',
+        } as OutputContactNodeData,
+      });
+    } else {
     signalNodes.push({
       id,
-      type:           reactFlowNodeType(displayInfo),
+      type:           nodeType,
       position:       pos,
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
@@ -293,6 +338,7 @@ export function buildReactFlowLayout(
         onToggle,
       } as GraphNodeData,
     });
+    }
 
     const expr = gn.equation?.expression ?? '';
     const ast  = expr ? parseExpression(expr) : null;
@@ -355,6 +401,74 @@ export function buildReactFlowLayout(
     }
   }
 
+  // ── Output contact nodes (OUTxxx) ────────────────────────────────────────
+  const outputContacts = parseOutputContacts(relay);
+  const outputContactNodes: Node[] = [];
+  const outputContactEdges: Edge[] = [];
+  const OUT_TIER_X = depths.length > 0
+    ? (Math.max(...depths) + 2) * NODE_H_GAP
+    : NODE_H_GAP * 6;  // Rightmost tier
+
+  let outIdx = 0;
+  const outCount = outputContacts.size;
+  for (const [outId, expr] of outputContacts) {
+    // Only create output contact nodes if not already in graph
+    if (graph.nodes.has(outId)) { outIdx++; continue; }
+
+    const yPos = (outIdx - (outCount - 1) / 2) * NODE_V_GAP;
+
+    outputContactNodes.push({
+      id:             outId,
+      type:           'outputContactNode',
+      position:       { x: OUT_TIER_X, y: yPos },
+      sourcePosition: Position.Right,
+      targetPosition: Position.Left,
+      data: {
+        nodeId:      outId,
+        expression:  expr,
+        signalState: (signalStates[outId] ?? 0) as 0 | 1,
+        animState:   'idle',
+      } as OutputContactNodeData,
+    });
+
+    // Find the source signals in the expression and wire edges
+    // Parse the expression to find referenced signals (typically TR, ALARM, etc.)
+    const exprAst = parseExpression(expr);
+    if (exprAst) {
+      // Collect direct operands — wire from main signal to output contact
+      const operands: string[] = [];
+      function collectOps(node: ASTNode): void {
+        if (node.type === 'Operand') { operands.push(node.name); return; }
+        if (node.type === 'BinaryOp') { collectOps(node.left); collectOps(node.right); }
+        if (node.type === 'UnaryOp') { collectOps(node.operand); }
+      }
+      collectOps(exprAst);
+
+      // Wire from any source node that IS in the graph (skip latches/etc for simplicity)
+      for (const src of operands) {
+        if (!graph.nodes.has(src) && !signalNodes.find(n => n.id === src) && !tcNodes.find(n => n.id === src)) continue;
+        const eid = `${src}->${outId}`;
+        if (!seenSignalEdgeIds.has(eid)) {
+          seenSignalEdgeIds.add(eid);
+          outputContactEdges.push({
+            id:        eid,
+            source:    src,
+            target:    outId,
+            type:      'animatedLogic',
+            markerEnd: { type: MarkerType.ArrowClosed, width: 10, height: 10, color: '#00ff88' },
+            data:      {
+              state:   (signalStates[src] ?? 0) as 0 | 1,
+              isNot:   false,
+              pulsing: false,
+            },
+          });
+        }
+      }
+    }
+
+    outIdx++;
+  }
+
   // ── Merge gate nodes — deduplicate by ID ──────────────────────────────────
   const seenGateIds = new Set<string>();
   const dedupedGateNodes: Node[] = [];
@@ -365,8 +479,25 @@ export function buildReactFlowLayout(
     }
   }
 
-  const allNodes = [...signalNodes, ...tcNodes, ...dedupedGateNodes];
-  const allEdges = [...signalEdges, ...tcEdges, ...ctx.gateEdges];
+  const allNodes = [...signalNodes, ...tcNodes, ...dedupedGateNodes, ...outputContactNodes];
+  const allEdges = [...signalEdges, ...tcEdges, ...ctx.gateEdges, ...outputContactEdges];
+
+  // ── Dev-only: warn about isolated nodes (zero incoming AND zero outgoing) ──
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if ((import.meta as any).env?.DEV !== false) {
+    const edgeSources = new Set(allEdges.map(e => e.source));
+    const edgeTargets = new Set(allEdges.map(e => e.target));
+    for (const n of allNodes) {
+      const hasIncoming = edgeTargets.has(n.id);
+      const hasOutgoing = edgeSources.has(n.id);
+      if (!hasIncoming && !hasOutgoing) {
+        // Skip intentional standalone nodes (output contacts with no source in graph)
+        if (n.type !== 'outputContactNode') {
+          console.error(`[SEL-Graph] Isolated node detected: "${n.id}" (type: ${n.type}) has no incoming or outgoing edges.`);
+        }
+      }
+    }
+  }
 
   return { nodes: allNodes, edges: allEdges };
 }

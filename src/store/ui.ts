@@ -10,6 +10,7 @@
 import { create } from 'zustand';
 import type { Node, Edge, Viewport } from 'reactflow';
 import type { SignalStates } from '../graph/propagate';
+import type { TimerState } from '../graph/timerSimulation';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,6 +45,8 @@ export interface UIState {
   pulsingEdgeIds: string[];
   /** nodeId → animState string for flashing nodes. */
   flashingNodes: Record<string, string>;
+  /** TC node ID → TimerState for all active timers. */
+  timerStates: Record<string, TimerState>;
 
   // ── Actions ───────────────────────────────────────────────────────────────
   setActiveTab: (tab: ActiveTab) => void;
@@ -73,6 +76,10 @@ export interface UIState {
   setFlashingNodes: (nodes: Record<string, string>) => void;
   /** Clear all animation state. */
   clearAnimations: () => void;
+  /** Update a single timer state. */
+  setTimerState: (nodeId: string, state: TimerState) => void;
+  /** Clear all timer states (called on relay switch). */
+  clearTimerStates: () => void;
 }
 
 // ─── Default viewport ─────────────────────────────────────────────────────────
@@ -100,6 +107,7 @@ export const useUIStore = create<UIState>((set) => ({
   lastChangeCount: 0,
   pulsingEdgeIds:  [],
   flashingNodes:   {},
+  timerStates:     {},
 
   // ── Tab actions ────────────────────────────────────────────────────────────
   setActiveTab:       (tab)  => set({ activeTab: tab }),
@@ -130,4 +138,6 @@ export const useUIStore = create<UIState>((set) => ({
   setPulsingEdgeIds:  (ids)    => set({ pulsingEdgeIds: ids }),
   setFlashingNodes:   (nodes)  => set({ flashingNodes: nodes }),
   clearAnimations:    ()       => set({ pulsingEdgeIds: [], flashingNodes: {} }),
+  setTimerState:  (nodeId, state) => set(s => ({ timerStates: { ...s.timerStates, [nodeId]: state } })),
+  clearTimerStates:   ()       => set({ timerStates: {} }),
 }));
