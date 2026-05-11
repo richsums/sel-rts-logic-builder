@@ -136,3 +136,78 @@ export function isDistance(id: string): boolean {
 export function isDifferential(id: string): boolean {
   return /^87/i.test(id);
 }
+
+// ─── Timer-counter (TC) node helpers ─────────────────────────────────────────
+
+/**
+ * Returns true if a protection element needs an intermediate timer-counter (TC)
+ * node between its pickup bit and trip word bit.
+ *
+ * Timed elements (need TC node):
+ *   51x (TOC), 67x (directional TOC), 21P2/21P3/21Gx/21Nx (distance with delay), 79x (recloser)
+ *
+ * Instantaneous elements (pickup → trip word bit directly, no TC node):
+ *   50x (inst overcurrent), 87x (differential), 21P1x (distance zone 1 — inst)
+ *
+ * @param id  Any protection element ID: pickup (P), trip (T), or bare base
+ */
+export function needsTimerNode(id: string): boolean {
+  const upper = id.toUpperCase();
+  if (!PROTECTION_PREFIX_RE.test(upper)) return false;
+  // Instantaneous overcurrent — no timer
+  if (/^50/.test(upper)) return false;
+  // Differential — no timer
+  if (/^87/.test(upper)) return false;
+  // Distance zone 1 is instantaneous; zones 2+ have timers
+  if (/^21P1/i.test(upper)) return false;
+  // All remaining 21x (zone 2+, ground, neutral) are timed
+  if (/^21/.test(upper)) return true;
+  // Time-overcurrent (51x) and directional TOC (67x) always timed
+  if (/^(51|67)/.test(upper)) return true;
+  // Recloser
+  if (/^79/.test(upper)) return true;
+  return false;
+}
+
+/**
+ * Given any protection element ID (pickup, trip, or base), return the
+ * timer-counter (TC) node ID used in the three-node chain.
+ *
+ * The TC node ID is formed by stripping the trailing 'P' or 'T' suffix (if
+ * present) and appending 'TC'.
+ *
+ * Returns null if the element does not need a timer node (instantaneous or
+ * non-protection element).
+ *
+ * Examples:
+ *   '51P1P'  → '51P1TC'   (TOC phase pickup)
+ *   '51G1P'  → '51G1TC'
+ *   '51N1P'  → '51N1TC'
+ *   '67P1P'  → '67P1TC'
+ *   '21P2P'  → '21P2TC'   (distance zone 2 — timed)
+ *   '21P3P'  → '21P3TC'
+ *   '79P'    → '79TC'     (recloser)
+ *   '50P1P'  → null       (instantaneous — no TC node)
+ *   '87LP'   → null       (differential — no TC node)
+ *   '21P1P'  → null       (zone 1 — instantaneous)
+ */
+export function timerNodeId(id: string): string | null {
+  if (!needsTimerNode(id)) return null;
+  // Strip trailing P or T to get the base, then append TC
+  const base = (id.endsWith('P') || id.endsWith('T')) ? id.slice(0, -1) : id;
+  return base + 'TC';
+}
+
+/**
+ * Returns true if the given ID is a timer-counter (TC) node identifier —
+ * i.e. it ends with 'TC' and has a timed protection element prefix.
+ *
+ * Examples returning true:  '51P1TC', '51G1TC', '67P1TC', '79TC', '21P2TC'
+ * Examples returning false: '50P1P', '51G1T', 'TD1', 'TC1'
+ */
+export function isTimerCounterNode(id: string): boolean {
+  if (!id.toUpperCase().endsWith('TC')) return false;
+  // The base is everything before 'TC'
+  const base = id.slice(0, -2);
+  return needsTimerNode(base + 'P');
+}

@@ -7,4 +7,8 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['lucide-react'],
   },
+  experimental: {
+    // Allows vitest to run in Linux CI without the native rollup binary
+    skipSsrTransform: true,
+  },
 })

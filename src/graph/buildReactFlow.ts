@@ -20,6 +20,7 @@ import type { GraphNodeData } from './nodes';
 import type { GateNodeData, GateType } from './nodes';
 import type { AnimatedLogicEdgeData } from './edges';
 import type { SignalStates } from './propagate';
+import { isPickupBit, isTripWordBit, timerNodeId } from './protection';
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
 
@@ -201,6 +202,78 @@ export function buildReactFlowLayout(
   const signalEdges: Edge[] = [];
   const seenSignalEdgeIds = new Set<string>();
 
+  // ── Pre-pass: collect TC nodes for timed protection elements ─────────────
+  // For every pickup bit (e.g. 51P1P) that has a corresponding trip word bit
+  // (51P1T) in the graph, insert a virtual timer-counter (TC) node (51P1TC)
+  // between them.  TC nodes live in the DependencyGraph only as display nodes;
+  // they are synthesised here and not present in graph.nodes.
+  const tcNodes: Node[]  = [];
+  const tcEdges: Edge[]  = [];
+
+  for (const [id] of graph.nodes) {
+    if (!isPickupBit(id)) continue;
+    const tcId   = timerNodeId(id);
+    if (!tcId) continue;                             // instantaneous — no TC
+
+    const tripId = id.slice(0, -1) + 'T';
+    if (!graph.nodes.has(tripId)) continue;          // trip word bit not in graph
+
+    const pickupPos = posOf.get(id)  ?? { x: 0, y: 0 };
+    const tripPos   = posOf.get(tripId) ?? { x: NODE_H_GAP * 2, y: 0 };
+
+    // Position TC node midway between pickup and trip word bit
+    const tcPos = {
+      x: (pickupPos.x + tripPos.x) / 2,
+      y: (pickupPos.y + tripPos.y) / 2,
+    };
+
+    // TC display info (timer kind)
+    const tcDisplayInfo = extractDisplaySettings(tcId, graph, relay);
+
+    tcNodes.push({
+      id:             tcId,
+      type:           'timerNode',
+      position:       tcPos,
+      sourcePosition: Position.Right,
+      targetPosition: Position.Left,
+      data: {
+        nodeId:      tcId,
+        displayInfo: tcDisplayInfo,
+        signalState: (signalStates[tcId] ?? 0) as 0 | 1,
+        animState:   'idle',
+        onToggle,
+      } as GraphNodeData,
+    });
+
+    // Pickup → TC edge (amber dashes while timing)
+    const e1 = `${id}->${tcId}`;
+    if (!seenSignalEdgeIds.has(e1)) {
+      seenSignalEdgeIds.add(e1);
+      tcEdges.push({
+        id:        e1,
+        source:    id,
+        target:    tcId,
+        type:      'animatedLogic',
+        markerEnd: { type: MarkerType.ArrowClosed, width: 8, height: 8, color: '#f59e0b' },
+        data:      { state: (signalStates[id] ?? 0) as 0 | 1, isNot: false, pulsing: false },
+      });
+    }
+
+    // TC → Trip word bit edge (white surge on trip, then green)
+    const e2 = `${tcId}->${tripId}`;
+    if (!seenSignalEdgeIds.has(e2)) {
+      seenSignalEdgeIds.add(e2);
+      tcEdges.push({
+        id:        e2,
+        source:    tcId,
+        target:    tripId,
+        type:      'animatedLogic',
+        markerEnd: { type: MarkerType.ArrowClosed, width: 8, height: 8, color: '#94a3b8' },
+        data:      { state: (signalStates[tripId] ?? 0) as 0 | 1, isNot: false, pulsing: false },
+      });
+    }
+  }
+
   // ── Build signal nodes + wire edges ───────────────────────────────────────
   for (const [id, gn] of graph.nodes) {
     const pos         = posOf.get(id) ?? { x: 0, y: 0 };
@@ -254,6 +327,13 @@ export function buildReactFlowLayout(
     } else {
       // ── Simple / no equation: direct dependency edges ─────────────────────
       for (const dep of gn.dependencies) {
+        // If a TC node is inserted between dep (pickup) and id (trip word bit),
+        // skip the direct edge — the TC node chain handles it.
+        if (isPickupBit(dep) && isTripWordBit(id)) {
+          const tcId = timerNodeId(dep);
+          if (tcId && seenSignalEdgeIds.has(`${tcId}->${id}`)) continue;
+        }
+
         const isNot = expr.toUpperCase().includes(`!${dep.toUpperCase()}`);
         const eid   = `${dep}->${id}`;
         if (!seenSignalEdgeIds.has(eid)) {
@@ -285,8 +365,8 @@ export function buildReactFlowLayout(
     }
   }
 
-  const allNodes = [...signalNodes, ...dedupedGateNodes];
-  const allEdges = [...signalEdges, ...ctx.gateEdges];
+  const allNodes = [...signalNodes, ...tcNodes, ...dedupedGateNodes];
+  const allEdges = [...signalEdges, ...tcEdges, ...ctx.gateEdges];
 
   return { nodes: allNodes, edges: allEdges };
 }

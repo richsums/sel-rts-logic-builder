@@ -5,3 +5,6 @@ dist-ssr
 .DS_Store
 .env
 .env.local
+# Vite config compilation artifacts (generated on vitest runs)
+*.timestamp-*.mjs
+vite.config.ts.new
