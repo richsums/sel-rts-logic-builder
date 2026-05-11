@@ -272,7 +272,7 @@ describe('buildReactFlowLayout — signal nodes', () => {
     expect(signalIds).toContain('OUT');
   });
 
-  it('assigns depth-based x positions', () => {
+  it('assigns column-based x positions (input at col 0, computed at col 4)', () => {
     const inA  = makeNode('A', [], null, { depth: 0 });
     const out  = makeNode('OUT', ['A'], 'A', { isInput: false, depth: 1 });
     const graph = makeGraph([inA, out]);
@@ -280,8 +280,10 @@ describe('buildReactFlowLayout — signal nodes', () => {
     const { nodes } = buildReactFlowLayout(graph, null, {}, () => {});
     const nodeA   = nodes.find(n => n.id === 'A')!;
     const nodeOut = nodes.find(n => n.id === 'OUT')!;
-    expect(nodeA.position.x).toBe(0);
-    expect(nodeOut.position.x).toBe(NODE_H_GAP);
+    // col 0 (inputSignalNode / unclassified) → x = 40
+    expect(nodeA.position.x).toBe(40);
+    // col 4 (logicGateNode default for computed nodes) → x = 940
+    expect(nodeOut.position.x).toBe(940);
   });
 });
 
@@ -302,18 +304,17 @@ describe('buildReactFlowLayout — gate node insertion (AND)', () => {
     expect(andGate!.data.inputCount).toBe(2);
   });
 
-  it('positions AND gate left of the target signal node', () => {
+  it('places AND gate in logic gate column (col 4, x=940)', () => {
     const inA  = makeNode('A', [], null, { depth: 0 });
     const inB  = makeNode('B', [], null, { depth: 0 });
     const out  = makeNode('OUT', ['A', 'B'], 'A * B', { isInput: false, depth: 1 });
     const graph = makeGraph([inA, inB, out]);
 
     const { nodes } = buildReactFlowLayout(graph, null, {}, () => {});
-    const nodeOut = nodes.find(n => n.id === 'OUT')!;
     const andGate = nodes.find(n => n.type === 'andGate')!;
 
-    expect(andGate.position.x).toBeLessThan(nodeOut.position.x);
-    expect(andGate.position.x).toBeCloseTo(nodeOut.position.x - GATE_H_OFFSET, 0);
+    // In the column-based layout all logic gate nodes go to col 4 (x = 940)
+    expect(andGate.position.x).toBe(940);
   });
 });
 

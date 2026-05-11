@@ -31,8 +31,8 @@ import {
   resolveCollisionsInTier,
   recentreTier,
   computeLayout,
-  TIER_H_GAP,
-  NODE_V_GAP,
+  classifyNodeColumn,
+  COL_X,
   MIN_H_GAP,
   MIN_V_GAP,
 } from '../graph/layout';
@@ -458,30 +458,31 @@ describe('Problem 4 — recentreTier', () => {
 // ─── Problem 4: no collisions after computeLayout ────────────────────────────
 
 describe('Problem 4 — detectCollisions empty after computeLayout', () => {
-  it('no collisions in layout of SEL-351 demo graph', () => {
+  it('no collisions in layout of SEL-351 demo graph (column-based layout)', () => {
     const graph = buildDependencyGraph(DEMO_SEL351.logicEquations);
-    const layout = computeLayout(graph);
+    const { nodes, edges } = buildReactFlowLayout(graph, DEMO_SEL351, {}, () => {});
+    // Run the column-based layout
+    const positioned = computeLayout(nodes, edges);
 
-    // Build positions and sizes maps
-    const positions = new Map<string, { x: number; y: number }>();
-    const sizes     = new Map<string, { width: number; height: number }>();
-    for (const [id, pos] of layout) {
-      positions.set(id, { x: pos.x, y: pos.y });
-      sizes.set(id, NODE_SIZES['default']);  // use default for tier-based layout
+    // Group by column
+    const colGroups = new Map<number, typeof positioned>();
+    for (const p of positioned) {
+      const colNode = nodes.find(n => n.id === p.id);
+      const col = classifyNodeColumn(p.id, colNode?.type);
+      if (!colGroups.has(col)) colGroups.set(col, []);
+      colGroups.get(col)!.push(p);
     }
 
-    // Only check within same tier (different tiers have different x values)
-    for (let tier = 0; tier <= 6; tier++) {
-      const tierIds = [...layout.entries()]
-        .filter(([, p]) => p.tier === tier)
-        .map(([id]) => id);
-      if (tierIds.length < 2) continue;
-
-      const tierPositions = new Map(tierIds.map(id => [id, positions.get(id)!]));
-      const tierSizes = new Map(tierIds.map(id => [id, sizes.get(id)!]));
-      // Same-tier nodes share the same x so use 0 margin for horizontal check
-      const collisions = detectCollisions(tierPositions, tierSizes);
-      expect(collisions, `Tier ${tier} has ${collisions.length} collisions: ${JSON.stringify(collisions)}`).toHaveLength(0);
+    // Check no two nodes in the same column overlap vertically
+    for (const [col, colNodes] of colGroups) {
+      if (colNodes.length < 2) continue;
+      const positions = new Map(colNodes.map(p => [p.id, p.position]));
+      const sizes = new Map(colNodes.map(p => [p.id, NODE_SIZES['default']]));
+      const collisions = detectCollisions(positions, sizes);
+      expect(
+        collisions,
+        `Col ${col} has ${collisions.length} collisions: ${JSON.stringify(collisions)}`,
+      ).toHaveLength(0);
     }
   });
 });
@@ -662,27 +663,38 @@ describe('End-to-end — SEL-421 full graph', () => {
   });
 });
 
-// ─── computeLayout tier stability ────────────────────────────────────────────
+// ─── computeLayout column stability ──────────────────────────────────────────
 
-describe('computeLayout — tier stability with collision resolution', () => {
-  it('after layout, all nodes still assigned to correct tiers', () => {
+describe('computeLayout — column stability (new column-based layout)', () => {
+  it('TR is placed at col 5 (x=1060)', () => {
     const graph = buildDependencyGraph(DEMO_SEL351.logicEquations);
-    const layout = computeLayout(graph);
-    // TR should be in tier 6
-    const trLayout = layout.get('TR');
-    expect(trLayout).toBeDefined();
-    expect(trLayout!.tier).toBe(6);
-    expect(trLayout!.x).toBe(6 * TIER_H_GAP);
+    const { nodes } = buildReactFlowLayout(graph, DEMO_SEL351, {}, () => {});
+    const trNode = nodes.find(n => n.id === 'TR');
+    expect(trNode).toBeDefined();
+    expect(trNode!.position.x).toBe(COL_X[5]);
   });
 
-  it('two pickup bits in same tier have distinct y positions', () => {
+  it('classifyNodeColumn: TR → col 5, 51P1P → col 1, 51P1TC → col 2, 51P1T → col 3', () => {
+    expect(classifyNodeColumn('TR')).toBe(5);
+    expect(classifyNodeColumn('51P1P')).toBe(1);
+    expect(classifyNodeColumn('51P1TC')).toBe(2);
+    expect(classifyNodeColumn('51P1T')).toBe(3);
+  });
+
+  it('TR → OUT101 edge exists in buildReactFlowLayout(DEMO_SEL351)', () => {
     const graph = buildDependencyGraph(DEMO_SEL351.logicEquations);
-    const layout = computeLayout(graph);
-    // Find all tier-1 nodes (pickup bits)
-    const tier1 = [...layout.entries()].filter(([, p]) => p.tier === 1).map(([id]) => id);
-    if (tier1.length >= 2) {
-      const y0 = layout.get(tier1[0])!.y;
-      const y1 = layout.get(tier1[1])!.y;
+    const { edges } = buildReactFlowLayout(graph, DEMO_SEL351, {}, () => {});
+    expect(edges.find(e => e.source === 'TR' && e.target === 'OUT101')).toBeDefined();
+  });
+
+  it('two pickup bits in same column have distinct y positions', () => {
+    const graph = buildDependencyGraph(DEMO_SEL351.logicEquations);
+    const { nodes } = buildReactFlowLayout(graph, DEMO_SEL351, {}, () => {});
+    // Find pickup bit nodes (col 1)
+    const pickups = nodes.filter(n => classifyNodeColumn(n.id, n.type) === 1);
+    if (pickups.length >= 2) {
+      const y0 = pickups[0].position.y;
+      const y1 = pickups[1].position.y;
       expect(Math.abs(y0 - y1)).toBeGreaterThan(0);
     }
   });

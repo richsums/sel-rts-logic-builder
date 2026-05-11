@@ -21,6 +21,7 @@ import type { GateNodeData, GateType } from './nodes';
 import type { AnimatedLogicEdgeData } from './edges';
 import type { SignalStates } from './propagate';
 import { isPickupBit, isTripWordBit, timerNodeId } from './protection';
+import { computeLayout } from './layout';
 
 // ─── Output contact parsing ───────────────────────────────────────────────────
 
@@ -499,7 +500,17 @@ export function buildReactFlowLayout(
     }
   }
 
-  return { nodes: allNodes, edges: allEdges };
+  // ── Apply column-based layout ─────────────────────────────────────────────
+  // Run the column-based layout engine to replace the depth-based positions
+  // computed earlier. This guarantees readable, non-overlapping node placement.
+  const positioned = computeLayout(allNodes, allEdges);
+  const positionMap = new Map(positioned.map(p => [p.id, p.position]));
+  const layoutedNodes = allNodes.map(n => ({
+    ...n,
+    position: positionMap.get(n.id) ?? n.position,
+  }));
+
+  return { nodes: layoutedNodes, edges: allEdges };
 }
 
 // ─── State updaters ───────────────────────────────────────────────────────────

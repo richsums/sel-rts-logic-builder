@@ -34,17 +34,18 @@ import {
 } from '../graph/timerSimulation';
 
 import {
-  assignTier,
+  classifyNodeColumn,
   computeLayout,
-  nodesInTier,
-  TIER_H_GAP,
-  NODE_V_GAP,
+  COL_X,
 } from '../graph/layout';
 
 import {
   buildReactFlowLayout,
 } from '../graph/buildReactFlow';
 
+import { buildDependencyGraph } from '../selogic/graph';
+import { DEMO_SEL351 } from '../store/demo-data';
+import type { Node as FlowNode } from 'reactflow';
 import type { DependencyGraph, GraphNode } from '../selogic/graph';
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -436,121 +437,178 @@ describe('timerBadgeLabel', () => {
   });
 });
 
-// ─── layout.ts — assignTier ───────────────────────────────────────────────────
+// ─── layout.ts — classifyNodeColumn ──────────────────────────────────────────
 
-describe('assignTier', () => {
-  it('assigns tier 0 to input nodes', () => {
-    const n = makeNode('52A', [], null, { isInput: true, depth: 0 });
-    expect(assignTier('52A', n)).toBe(0);
+describe('classifyNodeColumn', () => {
+  it('assigns col 0 to input signal nodes (52A)', () => {
+    expect(classifyNodeColumn('52A')).toBe(0);
+    expect(classifyNodeColumn('52A', 'inputSignalNode')).toBe(0);
   });
 
-  it('assigns tier 1 to pickup bits (even when flagged isInput)', () => {
-    const n = makeNode('51P1P', [], null, { isInput: true, depth: 1 });
-    expect(assignTier('51P1P', n)).toBe(1);
+  it('assigns col 1 to pickup bits', () => {
+    expect(classifyNodeColumn('51P1P')).toBe(1);
+    expect(classifyNodeColumn('51G1P')).toBe(1);
+    expect(classifyNodeColumn('87LP')).toBe(1);
   });
 
-  it('assigns tier 2 to timer-counter (TC) nodes', () => {
-    const n = makeNode('51P1TC', [], null, { isInput: false, depth: 2 });
-    expect(assignTier('51P1TC', n)).toBe(2);
+  it('assigns col 2 to timer-counter (TC) nodes', () => {
+    expect(classifyNodeColumn('51P1TC')).toBe(2);
+    expect(classifyNodeColumn('51G1TC')).toBe(2);
+    expect(classifyNodeColumn('79TC')).toBe(2);
+    expect(classifyNodeColumn('51P1TC', 'timerNode')).toBe(2);
   });
 
-  it('assigns tier 3 to trip word bits', () => {
-    const n = makeNode('51P1T', [], null, { isInput: false, depth: 3 });
-    expect(assignTier('51P1T', n)).toBe(3);
+  it('assigns col 3 to trip word bits', () => {
+    expect(classifyNodeColumn('51P1T')).toBe(3);
+    expect(classifyNodeColumn('51G1T')).toBe(3);
+    expect(classifyNodeColumn('87LT')).toBe(3);
   });
 
-  it('assigns tier 6 to trip output (TR)', () => {
-    const n = makeNode('TR', [], 'EXPR', { isInput: false, depth: 6 });
-    expect(assignTier('TR', n)).toBe(6);
+  it('assigns col 4 to logic gate nodes', () => {
+    expect(classifyNodeColumn('g_TR_0')).toBe(4);
+    expect(classifyNodeColumn('g_TR_1', 'andGate')).toBe(4);
+    expect(classifyNodeColumn('g_OUT_0', 'orGate')).toBe(4);
+    expect(classifyNodeColumn('node', 'notGate')).toBe(4);
   });
 
-  it('assigns tier 6 to TRIP output', () => {
-    const n = makeNode('TRIP', [], 'EXPR', { isInput: false, depth: 6 });
-    expect(assignTier('TRIP', n)).toBe(6);
+  it('assigns col 5 to TR trip output (case-insensitive)', () => {
+    expect(classifyNodeColumn('TR')).toBe(5);
+    expect(classifyNodeColumn('tr')).toBe(5);
+    expect(classifyNodeColumn('TRIP')).toBe(5);
+    expect(classifyNodeColumn('TR', 'tripOutputNode')).toBe(5);
+  });
+
+  it('assigns col 6 to output contacts', () => {
+    expect(classifyNodeColumn('OUT101')).toBe(6);
+    expect(classifyNodeColumn('OUT201')).toBe(6);
+    expect(classifyNodeColumn('out-OUT101')).toBe(6);
+    expect(classifyNodeColumn('NODE', 'outputContactNode')).toBe(6);
   });
 });
 
 // ─── layout.ts — computeLayout ────────────────────────────────────────────────
 
-describe('computeLayout — constants', () => {
-  it('exports TIER_H_GAP = 220', () => {
-    expect(TIER_H_GAP).toBe(220);
-  });
-
-  it('exports NODE_V_GAP = 120', () => {
-    expect(NODE_V_GAP).toBe(120);
-  });
+describe('computeLayout — column x positions', () => {
+  it('COL_X[0] = 40 (input signals)', () => expect(COL_X[0]).toBe(40));
+  it('COL_X[1] = 240 (pickup elements)', () => expect(COL_X[1]).toBe(240));
+  it('COL_X[2] = 480 (timer TC nodes)', () => expect(COL_X[2]).toBe(480));
+  it('COL_X[3] = 700 (trip word bits)', () => expect(COL_X[3]).toBe(700));
+  it('COL_X[4] = 940 (logic gates)', () => expect(COL_X[4]).toBe(940));
+  it('COL_X[5] = 1060 (TR output)', () => expect(COL_X[5]).toBe(1060));
+  it('COL_X[6] = 1320 (output contacts)', () => expect(COL_X[6]).toBe(1320));
 });
 
 describe('computeLayout — basic position assignment', () => {
-  it('places input nodes in tier 0 (x=0)', () => {
-    const inp = makeNode('52A', [], null, { isInput: true, depth: 0 });
-    const pkp = makeNode('51P1P', ['52A'], null, { isInput: true, depth: 1 });
-    const graph = makeGraph([inp, pkp]);
-    const layout = computeLayout(graph);
-    expect(layout.get('52A')!.x).toBe(0);
-    expect(layout.get('52A')!.tier).toBe(0);
+  it('places input signal node at col 0 x=40', () => {
+    const graph = buildDependencyGraph([]);
+    const { nodes } = buildReactFlowLayout(makeGraph([
+      makeNode('52A', [], null, { isInput: true, depth: 0 }),
+      makeNode('51P1P', [], null, { isInput: true, depth: 0 }),
+    ]), null, {}, () => {});
+    const inp = nodes.find(n => n.id === '52A');
+    expect(inp).toBeDefined();
+    expect(inp!.position.x).toBe(COL_X[0]);
   });
 
-  it('places pickup bits in tier 1 (x = TIER_H_GAP)', () => {
-    // Pickup bits are isInput=true in the graph, but assignTier puts them in tier 1
-    const inp = makeNode('52A', [], null, { isInput: true, depth: 0 });
-    const pkp = makeNode('51P1P', [], null, { isInput: true, depth: 0 });
-    const graph = makeGraph([inp, pkp]);
-    const layout = computeLayout(graph);
-    expect(layout.get('51P1P')!.x).toBe(TIER_H_GAP);
-    expect(layout.get('51P1P')!.tier).toBe(1);
+  it('places pickup bit at col 1 x=240', () => {
+    const { nodes } = buildReactFlowLayout(makeGraph([
+      makeNode('52A', [], null, { isInput: true, depth: 0 }),
+      makeNode('51P1P', [], null, { isInput: true, depth: 0 }),
+    ]), null, {}, () => {});
+    const pkp = nodes.find(n => n.id === '51P1P');
+    expect(pkp).toBeDefined();
+    expect(pkp!.position.x).toBe(COL_X[1]);
   });
 
-  it('places trip word bits in tier 3', () => {
-    const inp = makeNode('51P1P', [], null, { isInput: true, depth: 0 });
-    const twb = makeNode('51P1T', ['51P1P'], '51P1P', { isInput: false, depth: 1 });
-    const graph = makeGraph([inp, twb]);
-    const layout = computeLayout(graph);
-    expect(layout.get('51P1T')!.tier).toBe(3);
-    expect(layout.get('51P1T')!.x).toBe(3 * TIER_H_GAP);
+  it('places TC node at col 2 x=480', () => {
+    const { nodes } = buildReactFlowLayout(makeGraph([
+      makeNode('51P1P', [], null, { isInput: true, depth: 0 }),
+      makeNode('51P1T', ['51P1P'], '51P1P', { isInput: false, depth: 1 }),
+    ]), null, {}, () => {});
+    const tc = nodes.find(n => n.id === '51P1TC');
+    expect(tc).toBeDefined();
+    expect(tc!.position.x).toBe(COL_X[2]);
   });
 
-  it('places TC nodes in tier 2', () => {
-    const tc = makeNode('51P1TC', [], null, { isInput: false, depth: 2 });
-    const graph = makeGraph([tc]);
-    const layout = computeLayout(graph);
-    expect(layout.get('51P1TC')!.tier).toBe(2);
-    expect(layout.get('51P1TC')!.x).toBe(2 * TIER_H_GAP);
+  it('places trip word bit at col 3 x=700', () => {
+    const { nodes } = buildReactFlowLayout(makeGraph([
+      makeNode('51P1P', [], null, { isInput: true, depth: 0 }),
+      makeNode('51P1T', ['51P1P'], '51P1P', { isInput: false, depth: 1 }),
+    ]), null, {}, () => {});
+    const twb = nodes.find(n => n.id === '51P1T');
+    expect(twb).toBeDefined();
+    expect(twb!.position.x).toBe(COL_X[3]);
   });
 
-  it('centres single nodes in a tier at y=0', () => {
-    const n = makeNode('TR', [], 'X', { isInput: false, depth: 6 });
-    const graph = makeGraph([n]);
-    const layout = computeLayout(graph);
-    expect(layout.get('TR')!.y).toBe(0);
+  it('places TR at col 5 x=1060', () => {
+    const { nodes } = buildReactFlowLayout(makeGraph([
+      makeNode('52A', [], null, { isInput: true, depth: 0 }),
+      makeNode('TR', ['52A'], '52A', { isInput: false, depth: 1 }),
+    ]), null, {}, () => {});
+    const tr = nodes.find(n => n.id === 'TR');
+    expect(tr).toBeDefined();
+    expect(tr!.position.x).toBe(COL_X[5]);
   });
 
-  it('vertically separates two nodes in same tier by NODE_V_GAP', () => {
-    const a = makeNode('51P1P', [], null, { isInput: true, depth: 0 });
-    const b = makeNode('51G1P', [], null, { isInput: true, depth: 0 });
-    const graph = makeGraph([a, b]);
-    const layout = computeLayout(graph);
-    const yA = layout.get('51P1P')!.y;
-    const yB = layout.get('51G1P')!.y;
-    expect(Math.abs(yA - yB)).toBeCloseTo(NODE_V_GAP, 0);
+  it('centres single-node graph at y=0', () => {
+    const { nodes } = buildReactFlowLayout(makeGraph([
+      makeNode('TR', [], 'X', { isInput: false, depth: 0 }),
+    ]), null, {}, () => {});
+    const tr = nodes.find(n => n.id === 'TR');
+    expect(tr).toBeDefined();
+    expect(tr!.position.y).toBe(0);
+  });
+
+  it('vertically separates two nodes in same column', () => {
+    const { nodes } = buildReactFlowLayout(makeGraph([
+      makeNode('51P1P', [], null, { isInput: true, depth: 0 }),
+      makeNode('51G1P', [], null, { isInput: true, depth: 0 }),
+    ]), null, {}, () => {});
+    const yA = nodes.find(n => n.id === '51P1P')!.position.y;
+    const yB = nodes.find(n => n.id === '51G1P')!.position.y;
+    expect(Math.abs(yA - yB)).toBeGreaterThan(0);
   });
 });
 
-describe('nodesInTier', () => {
-  it('returns only nodes assigned to the given tier', () => {
-    const inp = makeNode('52A', [], null, { isInput: true, depth: 0 });
-    // 51P1P is a pickup bit — isInput=true but assignTier → tier 1
-    const pkp = makeNode('51P1P', [], null, { isInput: true, depth: 0 });
-    const graph = makeGraph([inp, pkp]);
-    const layout = computeLayout(graph);
+describe('computeLayout — direct call with FlowNode[]', () => {
+  it('classifyNodeColumn works for all expected node types', () => {
+    // Per spec: these exact inputs → these exact column numbers
+    expect(classifyNodeColumn('51P1P')).toBe(1);
+    expect(classifyNodeColumn('51P1TC')).toBe(2);
+    expect(classifyNodeColumn('51P1T')).toBe(3);
+    expect(classifyNodeColumn('tr')).toBe(5);         // lowercase
+    expect(classifyNodeColumn('out-OUT101')).toBe(6); // out- prefix
+  });
 
-    const tier0 = nodesInTier(layout, 0);
-    expect(tier0).toContain('52A');
-    expect(tier0).not.toContain('51P1P');
+  it('computeLayout([TR], []) returns single node at col 5', () => {
+    const n = { id: 'TR', type: 'tripOutputNode', position: { x: 0, y: 0 }, data: {} };
+    const result = computeLayout([n as FlowNode], []);
+    expect(result).toHaveLength(1);
+    expect(result[0].position.x).toBe(COL_X[5]);
+    expect(result[0].position.y).toBe(0);
+  });
 
-    const tier1 = nodesInTier(layout, 1);
-    expect(tier1).toContain('51P1P');
+  it('no overlapping bounding boxes after computeLayout on SEL-351', () => {
+    const graph = buildDependencyGraph(DEMO_SEL351.logicEquations);
+    const { nodes, edges } = buildReactFlowLayout(graph, DEMO_SEL351, {}, () => {});
+    // Check that no two nodes in the same column overlap vertically
+    const colGroups = new Map<number, typeof nodes>();
+    for (const node of nodes) {
+      const col = classifyNodeColumn(node.id, node.type);
+      if (!colGroups.has(col)) colGroups.set(col, []);
+      colGroups.get(col)!.push(node);
+    }
+    for (const [, colNodes] of colGroups) {
+      if (colNodes.length < 2) continue;
+      for (let i = 0; i < colNodes.length; i++) {
+        for (let j = i + 1; j < colNodes.length; j++) {
+          const a = colNodes[i].position;
+          const b = colNodes[j].position;
+          const overlap = Math.abs(a.y - b.y) < 50; // minimum 50px between centres
+          expect(overlap).toBe(false);
+        }
+      }
+    }
   });
 });
 
