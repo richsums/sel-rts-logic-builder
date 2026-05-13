@@ -6,5 +6,6 @@ export default defineConfig({
   test: {
     pool: 'forks',
     environment: 'node',
+    exclude: ['**/col0_debug.test.ts', '**/node_modules/**'],
   },
 })

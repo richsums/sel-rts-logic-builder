@@ -293,16 +293,24 @@ export interface PositionedNode {
 // ─── Main layout function ─────────────────────────────────────────────────────
 
 /**
- * Compute column-based layout positions for all React Flow nodes.
+ * Compute connection-aware layout positions for all React Flow nodes.
  *
  * Algorithm:
- *   1. Classify each node into a column (0–7) by type and ID pattern.
- *   2. Sort nodes within each column by protection priority, then alphabetically.
- *   3. Assign y positions per column, stacking top-to-bottom with appropriate row heights.
- *   4. For logic gate nodes (col 4): set y = average y of source nodes in edges.
- *      Process gates in topological order (sources before dependents).
- *   5. Centre all nodes vertically around y=0.
- *   6. Emit dev-mode assertions: no (0,0) positions, no overlaps within columns.
+ *   Step 1 — Anchor the rightmost tier first:
+ *            TR (col 5) at y = 0; output contacts (col 6) at y = 0.
+ *   Step 2 — Work backward left (cols 3 → 2 → 1 → 0):
+ *            For each node, set y = weighted average y of the nodes it connects
+ *            to in the next column. Gate nodes (col 4) are transparent for this
+ *            step — their y is resolved transitively to the first non-gate target.
+ *   Step 3 — Resolve vertical collisions within each non-gate column:
+ *            Sort by computed y, push overlapping nodes down (center-to-center
+ *            distance < nodeHeight/2 + nodeHeight/2 + MIN_V_GAP), then
+ *            re-centre the column so its midpoint aligns with y = 0.
+ *   Step 4 — Position logic gate nodes at the midpoint of their input nodes
+ *            (processed in topological order, sources before dependents).
+ *            Resolve gate collisions with resolveCollisionsInTier.
+ *   Step 5 — Final pass: eliminate any remaining per-column overlaps
+ *            (max 10 iterations, 20 px padding).
  *
  * @param nodes  React Flow node array (from buildReactFlowLayout)
  * @param edges  React Flow edge array (from buildReactFlowLayout)
@@ -314,144 +322,204 @@ export function computeLayout(
 ): PositionedNode[] {
   if (nodes.length === 0) return [];
 
-  // ── Step 1: Classify nodes into columns ──────────────────────────────────
-  // Separate gate nodes (col 4) since they are positioned relative to sources.
+  // ── Classify nodes into columns ──────────────────────────────────────────
+  const gateIds = new Set<string>();
   const columns = new Map<number, FlowNode[]>();
   for (let c = 0; c <= 7; c++) columns.set(c, []);
 
-  const gateNodes: FlowNode[] = [];
-
   for (const node of nodes) {
     const col = classifyNodeColumn(node.id, node.type);
-    if (col === 4) {
-      gateNodes.push(node);
-    } else {
-      columns.get(col)!.push(node);
-    }
+    columns.get(col)!.push(node);
+    if (col === 4) gateIds.add(node.id);
   }
 
-  // ── Step 2: Sort non-gate columns ────────────────────────────────────────
-  for (const colNodes of columns.values()) {
-    colNodes.sort((a, b) => {
-      const pa = protectionPriority(a.id);
-      const pb = protectionPriority(b.id);
-      if (pa !== pb) return pa - pb;
-      return a.id.localeCompare(b.id);
-    });
+  // ── Build edge adjacency ─────────────────────────────────────────────────
+  const outEdges = new Map<string, string[]>();  // node → [targets]
+  const inEdges  = new Map<string, string[]>();  // node → [sources]
+  for (const edge of edges) {
+    if (!outEdges.has(edge.source)) outEdges.set(edge.source, []);
+    outEdges.get(edge.source)!.push(edge.target);
+    if (!inEdges.has(edge.target)) inEdges.set(edge.target, []);
+    inEdges.get(edge.target)!.push(edge.source);
   }
 
-  // ── Step 3: Assign y positions for non-gate columns ──────────────────────
   const positions = new Map<string, { x: number; y: number }>();
 
-  for (const [col, colNodes] of columns) {
-    if (colNodes.length === 0) continue;
-    const x = COL_X[col] ?? COL_X[7];
-    const rowH = rowHeightForColumn(col);
+  // Transitively resolve the effective y of a node, following gate chains
+  // until a non-gate node with a known position is reached.
+  // The visited set prevents infinite recursion in degenerate cycles.
+  function resolveY(nodeId: string, visited = new Set<string>()): number | null {
+    if (visited.has(nodeId)) return null;
+    visited.add(nodeId);
+    if (!gateIds.has(nodeId)) {
+      // Non-gate: return its own y if already positioned
+      return positions.get(nodeId)?.y ?? null;
+    }
+    // Gate: average the effective y of its targets
+    const targets = outEdges.get(nodeId) ?? [];
+    const ys: number[] = [];
+    for (const t of targets) {
+      const y = resolveY(t, new Set(visited));
+      if (y !== null) ys.push(y);
+    }
+    return ys.length > 0 ? ys.reduce((a, b) => a + b, 0) / ys.length : null;
+  }
 
-    let y = COL_TOP_MARGIN;
+  // ── Step 1: Anchor col 5 (TR) at y = 0, col 6 (outputs) at y = 0 ────────
+  for (const node of (columns.get(5) ?? [])) {
+    positions.set(node.id, { x: COL_X[5], y: 0 });
+  }
+  for (const node of (columns.get(6) ?? [])) {
+    positions.set(node.id, { x: COL_X[6], y: 0 });
+  }
+
+  // ── Step 2: Barycenter — work backward cols 3 → 2 → 1 → 0 (and 7) ───────
+  // Gates (col 4) are not positioned here; resolveY follows through them.
+  for (const col of [3, 2, 1, 0, 7]) {
+    const colNodes = columns.get(col) ?? [];
+    if (colNodes.length === 0) continue;
+    const colX = COL_X[col] ?? COL_X[7];
+
     for (const node of colNodes) {
-      positions.set(node.id, { x, y });
-      y += rowH;
+      const targets = outEdges.get(node.id) ?? [];
+      const ys: number[] = [];
+      for (const t of targets) {
+        const y = resolveY(t);
+        if (y !== null) ys.push(y);
+      }
+      const y = ys.length > 0 ? ys.reduce((a, b) => a + b, 0) / ys.length : 0;
+      positions.set(node.id, { x: colX, y });
     }
   }
 
-  // ── Step 4: Position gate nodes from source midpoints ────────────────────
-  // Build adjacency: edge.target → [edge.source, ...]
-  const incomingEdges = new Map<string, string[]>();
-  for (const edge of edges) {
-    if (!incomingEdges.has(edge.target)) incomingEdges.set(edge.target, []);
-    incomingEdges.get(edge.target)!.push(edge.source);
+  // ── Step 3: Resolve collisions & re-centre per non-gate column ───────────
+  for (const col of [0, 1, 2, 3, 5, 6, 7]) {
+    const colNodes = columns.get(col) ?? [];
+    if (colNodes.length <= 1) continue;
+
+    // Sort by computed y (ascending)
+    colNodes.sort((a, b) => (positions.get(a.id)?.y ?? 0) - (positions.get(b.id)?.y ?? 0));
+
+    // Push overlapping nodes downward (center-to-center minimum distance).
+    // Use at least NODE_SIZES['default'].height so spacing is consistent with
+    // the detectCollisions check, which treats all nodes as default-sized.
+    const defH = NODE_SIZES['default'].height;
+    for (let i = 1; i < colNodes.length; i++) {
+      const prev = colNodes[i - 1];
+      const curr = colNodes[i];
+      const prevPos  = positions.get(prev.id)!;
+      const prevSize = nodeSizeForType(prev.type ?? 'default');
+      const currPos  = positions.get(curr.id)!;
+      const currSize = nodeSizeForType(curr.type ?? 'default');
+
+      const effPrevH = Math.max(prevSize.height, defH);
+      const effCurrH = Math.max(currSize.height, defH);
+      const minDist = effPrevH / 2 + effCurrH / 2 + MIN_V_GAP;
+      if (currPos.y - prevPos.y < minDist) {
+        positions.set(curr.id, { x: currPos.x, y: prevPos.y + minDist });
+      }
+    }
+
+    // Re-centre column: shift so midpoint of [minY, maxY] aligns with y = 0
+    const ys = colNodes.map(n => positions.get(n.id)!.y);
+    const mid = (Math.min(...ys) + Math.max(...ys)) / 2;
+    if (Math.abs(mid) > 0.5) {
+      for (const node of colNodes) {
+        const pos = positions.get(node.id)!;
+        positions.set(node.id, { x: pos.x, y: pos.y - mid });
+      }
+    }
   }
 
-  // Topological sort of gate nodes (process sources before dependents).
-  // Since gates can be chained (gate feeds another gate), we use Kahn's algorithm
-  // restricted to gate nodes only.
-  const gateIdSet = new Set(gateNodes.map(n => n.id));
+  // ── Step 4: Position gate nodes at midpoint of their input nodes ──────────
+  const gateNodes = [...gateIds]
+    .map(id => nodes.find(n => n.id === id))
+    .filter((n): n is FlowNode => n !== undefined);
 
+  // Topological sort: process gates whose gate-inputs are all positioned first.
   const gateInDeg = new Map<string, number>();
-  for (const gNode of gateNodes) {
-    const sources = incomingEdges.get(gNode.id) ?? [];
-    const gateSrcCount = sources.filter(s => gateIdSet.has(s)).length;
-    gateInDeg.set(gNode.id, gateSrcCount);
+  for (const id of gateIds) {
+    const srcs = inEdges.get(id) ?? [];
+    gateInDeg.set(id, srcs.filter(s => gateIds.has(s)).length);
   }
 
-  const gateQueue = gateNodes.filter(n => (gateInDeg.get(n.id) ?? 0) === 0);
-  const gateOutgoing = new Map<string, string[]>(); // source gate → downstream gate ids
-  for (const edge of edges) {
-    if (!gateIdSet.has(edge.source)) continue;
-    if (!gateOutgoing.has(edge.source)) gateOutgoing.set(edge.source, []);
-    gateOutgoing.get(edge.source)!.push(edge.target);
-  }
-
-  const topoGates: FlowNode[] = [];
-  const gateById = new Map(gateNodes.map(n => [n.id, n]));
+  const gateQueue = [...gateIds].filter(id => (gateInDeg.get(id) ?? 0) === 0);
+  const topoGateIds: string[] = [];
 
   while (gateQueue.length > 0) {
-    const cur = gateQueue.shift()!;
-    topoGates.push(cur);
-    for (const downId of gateOutgoing.get(cur.id) ?? []) {
-      if (!gateIdSet.has(downId)) continue;
-      const deg = (gateInDeg.get(downId) ?? 1) - 1;
-      gateInDeg.set(downId, deg);
-      if (deg <= 0) {
-        const dn = gateById.get(downId);
-        if (dn) gateQueue.push(dn);
-      }
+    const id = gateQueue.shift()!;
+    topoGateIds.push(id);
+    for (const t of (outEdges.get(id) ?? [])) {
+      if (!gateIds.has(t)) continue;
+      const d = (gateInDeg.get(t) ?? 1) - 1;
+      gateInDeg.set(t, d);
+      if (d <= 0) gateQueue.push(t);
     }
   }
-  // Remaining gates (cycles) — append at end
-  for (const gNode of gateNodes) {
-    if (!topoGates.find(n => n.id === gNode.id)) topoGates.push(gNode);
+  // Append any remaining (cyclic) gates
+  for (const id of gateIds) {
+    if (!topoGateIds.includes(id)) topoGateIds.push(id);
   }
 
-  const gateX = COL_X[4];
-
-  for (const gNode of topoGates) {
-    const sources = incomingEdges.get(gNode.id) ?? [];
-    const sourcePosArr = sources
-      .map(s => positions.get(s))
-      .filter((p): p is { x: number; y: number } => p !== undefined);
-
-    let y: number;
-    if (sourcePosArr.length > 0) {
-      y = sourcePosArr.reduce((sum, p) => sum + p.y, 0) / sourcePosArr.length;
-    } else {
-      // No positioned sources: use vertical midpoint of all positioned nodes
-      const allYs = Array.from(positions.values()).map(p => p.y);
-      y = allYs.length > 0
-        ? (Math.min(...allYs) + Math.max(...allYs)) / 2
-        : COL_TOP_MARGIN;
-    }
-    positions.set(gNode.id, { x: gateX, y });
+  for (const id of topoGateIds) {
+    const srcYs = (inEdges.get(id) ?? [])
+      .map(s => positions.get(s)?.y)
+      .filter((y): y is number => y !== undefined);
+    const y = srcYs.length > 0 ? srcYs.reduce((a, b) => a + b, 0) / srcYs.length : 0;
+    positions.set(id, { x: COL_X[4], y });
   }
 
-  // ── Step 4b: Resolve gate collisions ─────────────────────────────────────
-  // Sort gates by their computed y, then spread them out if they overlap.
+  // Resolve gate collisions (sort by y, push overlapping gates down).
+  // Use actual node sizes so spacing is consistent with the final-pass PAD check.
   if (gateNodes.length > 1) {
-    const gateSorted = [...gateNodes].sort((a, b) => {
-      const ya = positions.get(a.id)?.y ?? 0;
-      const yb = positions.get(b.id)?.y ?? 0;
-      return ya - yb;
-    });
-    const gateIds = gateSorted.map(n => n.id);
-    const gateSizes = new Map(gateIds.map(id => [id, NODE_SIZES['default']]));
-    resolveCollisionsInTier(gateIds, positions, gateSizes);
+    const sortedGates = [...gateNodes].sort(
+      (a, b) => (positions.get(a.id)?.y ?? 0) - (positions.get(b.id)?.y ?? 0)
+    );
+    const sortedIds   = sortedGates.map(n => n.id);
+    const gateSizeMap = new Map(
+      sortedGates.map(n => [n.id, nodeSizeForType(n.type ?? 'default')])
+    );
+    resolveCollisionsInTier(sortedIds, positions, gateSizeMap);
   }
 
-  // ── Step 5: Centre all nodes vertically around y=0 ───────────────────────
-  if (positions.size > 0) {
-    const allYs = Array.from(positions.values()).map(p => p.y);
-    const minY = Math.min(...allYs);
-    const maxY = Math.max(...allYs);
-    const centre = (minY + maxY) / 2;
-    if (Math.abs(centre) > 0.5) {
-      for (const [id, pos] of positions) {
-        positions.set(id, { x: pos.x, y: pos.y - centre });
+  // ── Step 5: Final pass — eliminate remaining per-column overlaps ──────────
+  const PAD = 20;
+  for (let iter = 0; iter < 10; iter++) {
+    let anyFixed = false;
+    for (const col of [0, 1, 2, 3, 4, 5, 6, 7]) {
+      const colNodes = col === 4
+        ? gateNodes
+        : (columns.get(col) ?? []);
+      if (colNodes.length <= 1) continue;
+
+      const sorted = [...colNodes].sort(
+        (a, b) => (positions.get(a.id)?.y ?? 0) - (positions.get(b.id)?.y ?? 0)
+      );
+      for (let i = 1; i < sorted.length; i++) {
+        const prev = sorted[i - 1];
+        const curr = sorted[i];
+        const pp = positions.get(prev.id)!;
+        const cp = positions.get(curr.id)!;
+        if (!pp || !cp) continue;
+        const ps = nodeSizeForType(prev.type ?? 'default');
+        const cs = nodeSizeForType(curr.type ?? 'default');
+        const prevBottom = pp.y + ps.height / 2 + PAD;
+        const currTop    = cp.y - cs.height / 2;
+        if (currTop < prevBottom) {
+          const newY = prevBottom + cs.height / 2;
+          // Only count as a real fix when the position actually changes (guards
+          // against floating-point rounding producing the same float value).
+          if (newY !== cp.y) {
+            positions.set(curr.id, { x: cp.x, y: newY });
+            anyFixed = true;
+          }
+        }
       }
     }
+    if (!anyFixed) break;
   }
 
-  // ── Step 6: Dev-mode assertions ───────────────────────────────────────────
+  // ── Dev-mode assertions ───────────────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if ((import.meta as any).env?.MODE !== 'production') {
     const multiNode = nodes.length > 1;

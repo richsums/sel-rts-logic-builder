@@ -5,10 +5,17 @@
  *  - protection.ts  — resolveTripWordBit, resolvePickupBit, isPickupBit, isTripWordBit,
  *                     elementBase, isInstantaneous, isTimeOvercurrent, isDistance, isDifferential
  *  - buildReactFlow.ts — gate node insertion from AST, position assignment, edge wiring
+ *  - layout.ts — computeLayout: connection-aware vertical ordering, no-overlap guarantee
  */
 
 import { describe, it, expect } from 'vitest';
+import type { Node as FlowNode, Edge as FlowEdge } from 'reactflow';
 import type { SourceRef } from '../relay-adapters/common/types';
+import {
+  computeLayout,
+  classifyNodeColumn,
+  nodeSizeForType,
+} from '../graph/layout';
 
 import {
   resolveTripWordBit,
@@ -448,5 +455,151 @@ describe('buildReactFlowLayout — no relay → settings show defaults', () => {
     const graph = makeGraph([inA, out]);
 
     expect(() => buildReactFlowLayout(graph, null, {}, () => {})).not.toThrow();
+  });
+});
+
+// ─── computeLayout — connection-aware vertical ordering ───────────────────────
+
+/** Minimal FlowNode factory for layout tests. */
+function fNode(id: string, type: string): FlowNode {
+  return { id, type, position: { x: 0, y: 0 }, data: {} } as FlowNode;
+}
+
+/** Minimal FlowEdge factory for layout tests. */
+function fEdge(source: string, target: string): FlowEdge {
+  return { id: `e-${source}-${target}`, source, target } as FlowEdge;
+}
+
+describe('computeLayout — SEL-351 chain alignment', () => {
+  // TR := 51P1T * !50BF * 52A
+  // Protection chain: 51P1P → 51P1TC → 51P1T → g_and → TR
+  // Inputs: 52A → g_and, 50BF → g_not → g_and
+
+  const nodes: FlowNode[] = [
+    fNode('52A',    'inputSignalNode'),
+    fNode('50BF',   'inputSignalNode'),
+    fNode('51P1P',  'protectionElement'),
+    fNode('51P1TC', 'timerNode'),
+    fNode('51P1T',  'protectionElement'),
+    fNode('g_not',  'notGate'),
+    fNode('g_and',  'andGate'),
+    fNode('TR',     'tripOutputNode'),
+  ];
+
+  const edges: FlowEdge[] = [
+    fEdge('52A',    'g_and'),
+    fEdge('50BF',   'g_not'),
+    fEdge('51P1P',  '51P1TC'),
+    fEdge('51P1TC', '51P1T'),
+    fEdge('51P1T',  'g_and'),
+    fEdge('g_not',  'g_and'),
+    fEdge('g_and',  'TR'),
+  ];
+
+  const result = computeLayout(nodes, edges);
+  const pos = (id: string) => result.find(p => p.id === id)!.position;
+
+  it('places TR at y = 0 (anchor)', () => {
+    expect(pos('TR').y).toBe(0);
+  });
+
+  it('places 51P1T at the same y as TR (direct chain through gate)', () => {
+    // 51P1T → g_and → TR(y=0); barycenter resolves to y=0
+    expect(Math.abs(pos('51P1T').y)).toBeLessThan(5);
+  });
+
+  it('places 51P1TC at the same y as 51P1T (horizontal chain)', () => {
+    expect(Math.abs(pos('51P1TC').y - pos('51P1T').y)).toBeLessThan(5);
+  });
+
+  it('places 51P1P at the same y as 51P1TC (horizontal chain)', () => {
+    expect(Math.abs(pos('51P1P').y - pos('51P1TC').y)).toBeLessThan(5);
+  });
+
+  it('assigns correct column x positions', () => {
+    expect(pos('TR').x).toBe(1060);     // col 5
+    expect(pos('51P1T').x).toBe(700);   // col 3
+    expect(pos('51P1TC').x).toBe(480);  // col 2
+    expect(pos('51P1P').x).toBe(240);   // col 1
+    expect(pos('52A').x).toBe(40);      // col 0
+    expect(pos('g_and').x).toBe(940);   // col 4
+  });
+});
+
+describe('computeLayout — SEL-421 POTT no-overlap guarantee', () => {
+  // POTT scheme: two trip paths (21P and 51P), both gated with RxWI and 52A
+  const nodes: FlowNode[] = [
+    fNode('RxWI',   'inputSignalNode'),
+    fNode('52A',    'inputSignalNode'),
+    fNode('21P1P',  'protectionElement'),
+    fNode('51P1P',  'protectionElement'),
+    fNode('21P1T',  'protectionElement'),
+    fNode('51P1T',  'protectionElement'),
+    fNode('g_and1', 'andGate'),
+    fNode('g_and2', 'andGate'),
+    fNode('g_or',   'orGate'),
+    fNode('TR',     'tripOutputNode'),
+  ];
+
+  const edges: FlowEdge[] = [
+    fEdge('21P1P',  '21P1T'),
+    fEdge('51P1P',  '51P1T'),
+    fEdge('21P1T',  'g_and1'),
+    fEdge('RxWI',   'g_and1'),
+    fEdge('52A',    'g_and1'),
+    fEdge('52A',    'g_and2'),
+    fEdge('51P1T',  'g_and2'),
+    fEdge('g_and1', 'g_or'),
+    fEdge('g_and2', 'g_or'),
+    fEdge('g_or',   'TR'),
+  ];
+
+  it('no two nodes in the same column have overlapping bounding boxes (20 px padding)', () => {
+    const result = computeLayout(nodes, edges);
+    const posMap = new Map(result.map(p => [p.id, p.position]));
+
+    // Group node IDs by column
+    const cols = new Map<number, string[]>();
+    for (const node of nodes) {
+      const col = classifyNodeColumn(node.id, node.type);
+      if (!cols.has(col)) cols.set(col, []);
+      cols.get(col)!.push(node.id);
+    }
+
+    // For each column, check every pair for vertical overlap
+    for (const [, colIds] of cols) {
+      if (colIds.length <= 1) continue;
+      for (let i = 0; i < colIds.length; i++) {
+        for (let j = i + 1; j < colIds.length; j++) {
+          const aId   = colIds[i];
+          const bId   = colIds[j];
+          const aPos  = posMap.get(aId)!;
+          const bPos  = posMap.get(bId)!;
+          const aNode = nodes.find(n => n.id === aId)!;
+          const bNode = nodes.find(n => n.id === bId)!;
+          const aSize = nodeSizeForType(aNode.type ?? 'default');
+          const bSize = nodeSizeForType(bNode.type ?? 'default');
+
+          const aBottom = aPos.y + aSize.height / 2 + 20;
+          const bBottom = bPos.y + bSize.height / 2 + 20;
+          const aTop    = aPos.y - aSize.height / 2;
+          const bTop    = bPos.y - bSize.height / 2;
+
+          const overlap = aBottom > bTop && bBottom > aTop;
+          if (overlap) {
+            throw new Error(
+              `Overlap in col ${classifyNodeColumn(aId, aNode.type)}: ` +
+              `${aId}(y=${aPos.y.toFixed(1)}) overlaps ${bId}(y=${bPos.y.toFixed(1)})`
+            );
+          }
+        }
+      }
+    }
+  });
+
+  it('places TR at y = 0', () => {
+    const result  = computeLayout(nodes, edges);
+    const trPos   = result.find(p => p.id === 'TR')!;
+    expect(trPos.position.y).toBe(0);
   });
 });

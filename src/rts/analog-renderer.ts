@@ -25,6 +25,7 @@ import {
   getFloat,
 } from './settings-extractor';
 import { computeOperateTime } from './operate-time';
+import { isComputedOutput } from './renderer';
 
 // ─── Protection function classifier ──────────────────────────────────────────
 
@@ -618,7 +619,16 @@ function buildLogicProfile(
     for (const step of state.steps) {
       switch (step.type) {
         case 'COMMENT': lines.push(`    * ${step.comment}`);                              break;
-        case 'SET':     lines.push(`    SET BINARY ${step.signal} ${step.value}`);        break;
+        case 'SET': {
+          const sig = step.signal ?? '';
+          if (isComputedOutput(sig)) {
+            lines.push(`    * NOTE: ${sig} is a computed output — assert via analog injection per trip equation`);
+            lines.push(`    * TODO: inject analog quantities to satisfy trip equation for ${sig}`);
+          } else {
+            lines.push(`    SET BINARY ${sig} ${step.value}`);
+          }
+          break;
+        }
         case 'WAIT':    lines.push(`    WAIT ${step.ms}`);                                break;
         case 'CHECK':   lines.push(`    CHECK CONTACT ${step.signal} == ${step.value}`);  break;
       }
@@ -695,10 +705,18 @@ function buildInhibitProfile(
 
   const supervisorLines: string[] = [];
   for (const s of andConds) {
-    supervisorLines.push(`    SET BINARY ${s} 1          * Supervisor / AND condition`);
+    if (isComputedOutput(s)) {
+      supervisorLines.push(`    * NOTE: ${s} is a computed output — assert via analog injection`);
+    } else {
+      supervisorLines.push(`    SET BINARY ${s} 1          * Supervisor / AND condition`);
+    }
   }
   for (const s of notConds) {
-    supervisorLines.push(`    SET BINARY ${s} 0          * NOT condition — de-assert blocking signal`);
+    if (isComputedOutput(s)) {
+      supervisorLines.push(`    * NOTE: ${s} is a computed output — assert via analog injection`);
+    } else {
+      supervisorLines.push(`    SET BINARY ${s} 0          * NOT condition — de-assert blocking signal`);
+    }
   }
 
   const header = buildHeader(tc.label, relay, tc.sourceLines, 'INHIBIT', leaf, 'DIGITAL', [
@@ -716,7 +734,9 @@ function buildInhibitProfile(
     `    INJECT ${ch} 0.00 0.0`,
     ...(injectVoltage ? [`    INJECT VA ${fmt(vnom)} 0.0`, `    INJECT VB ${fmt(vnom)} -120.0`, `    INJECT VC ${fmt(vnom)} 120.0`] : []),
     `    PREFAULT 500`,
-    `    SET BINARY ${blockSig} ${assertVal}    * ${blockDesc}`,
+    ...(isComputedOutput(blockSig)
+      ? [`    * NOTE: ${blockSig} is a computed output — assert via analog injection`]
+      : [`    SET BINARY ${blockSig} ${assertVal}    * ${blockDesc}`]),
     ...supervisorLines,
     `    WAIT 100`,
     ``,
@@ -734,7 +754,9 @@ function buildInhibitProfile(
     ``,
     `  STATE 4`,
     `    * Release block — verify trip NOW asserts (proves block was causal)`,
-    `    SET BINARY ${blockSig} ${releaseVal}    * ${releaseDesc}`,
+    ...(isComputedOutput(blockSig)
+      ? [`    * NOTE: ${blockSig} is a computed output — assert via analog injection`]
+      : [`    SET BINARY ${blockSig} ${releaseVal}    * ${releaseDesc}`]),
     `    WAIT 50`,
     `    CHECK CONTACT TRIP == 1         * Trip asserts once block removed`,
     `    CHECK ELEMENT TR == 1`,
