@@ -197,9 +197,9 @@ describe('renderAnalogScript — 51P TOC (SEL-351)', () => {
   // build once
   script = renderAnalogScript(tc, DEMO_SEL351);
 
-  it('contains INJECT commands (not legacy digital SET)', () => {
-    expect(script).toContain('INJECT');
-    expect(script).toContain('RAMP');
+  it('contains constant INJECT commands (not RAMP or legacy digital SET)', () => {
+    expect(script).toContain('INJECT IA');
+    expect(script).not.toContain('RAMP IA');
     expect(script).not.toContain('SET 51P1');
   });
 

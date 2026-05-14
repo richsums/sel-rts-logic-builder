@@ -454,8 +454,9 @@ describe('renderAnalogScript — positive path with conditions (SEL-351)', () =>
   };
   const script = renderAnalogScript(tc, DEMO_SEL351);
 
-  it('contains RAMP (TOC profile selected for 51P element)', () => {
-    expect(script).toContain('RAMP');
+  it('uses constant INJECT for TOC (51P element uses constant-injection profile)', () => {
+    expect(script).toContain('INJECT IA');
+    expect(script).not.toContain('RAMP IA');
   });
 
   it('injects SET BINARY 52A 1 as AND supervisor setup', () => {
@@ -606,14 +607,15 @@ describe('renderAllAnalogScripts — filename conventions', () => {
     }
   });
 
-  it('positive path scripts include Pat<N> in filename', () => {
+  it('positive path scripts include Pat<N> or multiplier suffix (_2x/_3x/_4x) in filename', () => {
     const graph = buildDependencyGraph(DEMO_SEL351.logicEquations);
     const tcs   = generateAllTestCases(DEMO_SEL351.logicEquations, graph);
     const scripts = renderAllAnalogScripts(tcs, DEMO_SEL351);
     const positives = scripts.filter(s => !s.filename.includes('INHIBIT'));
     expect(positives.length).toBeGreaterThan(0);
     for (const s of positives) {
-      expect(s.filename).toMatch(/Pat[A-Z]/);
+      // 51-type elements use _2x/_3x/_4x naming; all other elements use _Pat<N>
+      expect(s.filename).toMatch(/(?:Pat[A-Z]|\d+x)\.rts$/);
     }
   });
 

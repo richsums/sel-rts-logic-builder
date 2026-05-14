@@ -24,7 +24,7 @@ import {
   extractCurveType,
   getFloat,
 } from './settings-extractor';
-import { computeOperateTime } from './operate-time';
+import { computeOperateTimeMs as computeTOCMs, selCodeToCurveType } from './curves';
 import { isComputedOutput } from './renderer';
 
 // ─── Protection function classifier ──────────────────────────────────────────
@@ -39,7 +39,7 @@ export type ProtectionFunction =
   | 'SEF'
   | 'LOGIC';
 
-export type InjectionMethod = 'RAMP' | 'PULSE_RAMP' | 'IMPEDANCE' | 'DIFFERENTIAL' | 'DIGITAL';
+export type InjectionMethod = 'RAMP' | 'PULSE_RAMP' | 'IMPEDANCE' | 'DIFFERENTIAL' | 'DIGITAL' | 'CONSTANT';
 
 /**
  * Classify a protection element from its label (and optionally expression/signals).
@@ -174,32 +174,40 @@ function buildScript(
 
 // ─── Injection profile builders ───────────────────────────────────────────────
 
-/** Time Overcurrent (51P, 51G, 51N, SEF) — current ramp with timing check. */
-function buildTOCProfile(
+/**
+ * Time Overcurrent (51P, 51G, 51N, SEF) — constant current at M× pickup.
+ *
+ * Replaces the former RAMP approach. A fixed current multiple gives a precisely
+ * calculable operate time directly verifiable against the curve formula:
+ *   t = TD × K / (M^α − 1) ms
+ *
+ * @param M  Current multiple of pickup (2, 3, or 4)
+ */
+function buildTOCConstantScript(
   element: string,
   map: SettingsMap,
   relay: ParsedRelaySettings,
   label: string,
   sourceLines: number[],
   pattern: string,
+  M: number,
 ): string {
-  const pickup = extractPickupSetting(map, element);
-  const td     = extractTimeDial(map, element);
-  const curve  = extractCurveType(map, element);
-  const vnom   = getFloat(map, 'VNOM', 67.0);
-  const pu     = pickup.value;
+  const pickup   = extractPickupSetting(map, element);
+  const td       = extractTimeDial(map, element);
+  const selCurve = extractCurveType(map, element);
+  const curve    = selCodeToCurveType(selCurve);
+  const vnom     = getFloat(map, 'VNOM', 67.0);
+  const pu       = pickup.value;
 
-  // Test at 2× pickup
-  const M          = 2.0;
-  const operateSec = computeOperateTime(curve, td.value, M);
-  const operateMs  = isFinite(operateSec) ? Math.round(operateSec * 1000) : 5000;
-  const minMs      = Math.round(operateMs * 0.9);
-  const maxMs      = Math.round(operateMs * 1.1);
-  const faultA     = pu * M;
+  const testCurrentA = pu * M;
+  const operateMs    = Math.round(computeTOCMs(curve, td.value, M));
+  const minMs        = Math.round(operateMs * 0.95);
+  const maxMs        = Math.round(operateMs * 1.05);
+  const waitMs       = Math.round(operateMs * 1.1) + 100;
 
   // Neutral channel for ground/SEF elements
-  const isGround  = element === '51G' || element === '51N' || element === 'SEF';
-  const ch        = isGround ? 'IN' : 'IA';
+  const isGround = element === '51G' || element === '51N' || element === 'SEF';
+  const ch       = isGround ? 'IN' : 'IA';
 
   const puNote = pickup.isDefault
     ? ` (default — ${pickup.key} not found in settings)`
@@ -208,11 +216,14 @@ function buildTOCProfile(
     ? ` (default — ${td.key} not found)`
     : ` (from ${td.key})`;
 
-  return buildScript(label, relay, sourceLines, pattern, element, 'RAMP', [
+  return buildScript(label, relay, sourceLines, pattern, element, 'CONSTANT', [
     `* Pickup Setting:   ${fmt(pu)} A secondary${puNote}`,
     `* Time Dial:        ${fmt(td.value)}${tdNote}`,
-    `* Curve:            ${curve}`,
-    `* Operate Time:     ${operateMs} ms at ${M}x pickup (${curve} curve, TD=${fmt(td.value)})`,
+    `* Curve:            ${selCurve} (${curve})`,
+    `* Test Multiple:    ${M}× pickup`,
+    `* Test Current:     ${fmt(testCurrentA)} A secondary`,
+    `* Expected Operate Time: ${operateMs} ms ± 5% (${minMs}–${maxMs} ms)`,
+    `*   (t = TD × K / (M^α − 1); curve=${curve}, TD=${fmt(td.value)}, M=${M})`,
   ], [
     `  STATE 1`,
     `    * Prefault initialisation — relay settling`,
@@ -221,31 +232,47 @@ function buildTOCProfile(
     `    INJECT VB ${fmt(vnom)} -120.0`,
     `    INJECT VC ${fmt(vnom)} 120.0`,
     `    PREFAULT 500`,
+    `    WAIT 200`,
     ``,
-    `  STATE 2`,
-    `    * Ramp to 90% pickup — verify NO pickup`,
-    `    RAMP ${ch} FROM 0.00 TO ${fmt(pu * 0.9)} IN 200`,
+    `  STATE 2 — Apply constant fault current at ${M}× pickup`,
+    `    INJECT ${ch} ${fmt(testCurrentA)} 0.0`,
     `    WAIT 100`,
-    `    CHECK ELEMENT ${label} == RESET`,
-    ``,
-    `  STATE 3`,
-    `    * Ramp through pickup threshold`,
-    `    RAMP ${ch} FROM ${fmt(pu * 0.9)} TO ${fmt(pu * 1.1)} IN 200`,
     `    CHECK ELEMENT ${label} == PICKUP`,
     ``,
-    `  STATE 4`,
-    `    * Ramp to fault level (${M}x pickup = ${fmt(faultA)} A) and wait for operate`,
-    `    RAMP ${ch} FROM ${fmt(pu * 1.1)} TO ${fmt(faultA)} IN 100`,
-    `    WAIT ${operateMs + 200}`,
+    `  STATE 3 — Wait for timer to operate`,
+    `    WAIT ${waitMs}`,
+    ``,
+    `  STATE 4 — Verify trip`,
     `    CHECK ELEMENT ${label} == TRIP`,
     `    CHECK TIMING ${label} WITHIN ${minMs} ${maxMs}`,
     ``,
-    `  STATE 5`,
-    `    * Remove fault current — verify reset`,
+    `  STATE 5 — Remove current, verify reset`,
     `    INJECT ${ch} 0.00 0.0`,
-    `    WAIT 100`,
+    `    WAIT 200`,
     `    CHECK ELEMENT ${label} == RESET`,
   ]);
+}
+
+/**
+ * Generate the three constant-injection scripts (2×, 3×, 4× pickup) for a
+ * single 51-type element. Intended for direct use in tests and export pipelines.
+ *
+ * @param element  Base element type: '51P', '51G', or '51N'
+ * @param relay    Parsed relay settings (source of pickup, TD, curve)
+ * @returns        Array of { label, content } — one entry per multiplier
+ */
+export function generateScriptsForElement(
+  element: string,
+  relay: ParsedRelaySettings,
+): Array<{ label: string; content: string }> {
+  const base = element.replace(/\d+$/, '').toUpperCase();
+  if (!['51P', '51G', '51N'].includes(base)) return [];
+
+  const map = buildSettingsMap(relay);
+  return [2, 3, 4].map(M => ({
+    label:   `${relay.tag}_${element}_${M}x`,
+    content: buildTOCConstantScript(base, map, relay, element, [0], 'A', M),
+  }));
 }
 
 /** Instantaneous Overcurrent (50P, 50G, 50N) — step or pulse-ramp injection. */
@@ -819,10 +846,10 @@ export function renderAnalogScript(
   // We do this by building the script normally and then injecting the preamble.
   let script: string;
   switch (protFn) {
-    case '51P':  script = buildTOCProfile('51P', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
-    case '51G':  script = buildTOCProfile('51G', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
-    case '51N':  script = buildTOCProfile('51N', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
-    case 'SEF':  script = buildTOCProfile('SEF', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
+    case '51P':  script = buildTOCConstantScript('51P', map, relay, elementLabel, tc.sourceLines, tc.pattern, 2); break;
+    case '51G':  script = buildTOCConstantScript('51G', map, relay, elementLabel, tc.sourceLines, tc.pattern, 2); break;
+    case '51N':  script = buildTOCConstantScript('51N', map, relay, elementLabel, tc.sourceLines, tc.pattern, 2); break;
+    case 'SEF':  script = buildTOCConstantScript('SEF', map, relay, elementLabel, tc.sourceLines, tc.pattern, 2); break;
     case '50P':  script = buildIOCProfile('50P', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
     case '50G':  script = buildIOCProfile('50G', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
     case '50N':  script = buildIOCProfile('50N', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
@@ -850,16 +877,34 @@ export function renderAnalogScript(
 
 /**
  * Render all test cases for a relay using analog injection profiles.
- * INHIBIT scripts use a flat filename format; positive tests use Pat<N> suffix.
+ *
+ * 51-type positive tests (51P/51G/51N) are expanded to three scripts at
+ * 2×, 3×, and 4× pickup for comprehensive curve verification.
+ * All other element types and all INHIBIT tests produce one script each.
  */
 export function renderAllAnalogScripts(
   testCases: GeneratedTestCase[],
   relay: ParsedRelaySettings,
 ): Array<{ filename: string; content: string }> {
-  return testCases.map(tc => ({
-    filename: tc.pattern === 'INHIBIT'
-      ? `${relay.tag}_${tc.label}.rts`
-      : `${relay.tag}_${tc.label}_Pat${tc.pattern}.rts`,
-    content: renderAnalogScript(tc, relay),
-  }));
+  return testCases.flatMap(tc => {
+    const elementLabel = tc.leafElement ?? tc.label;
+    const protFn = classifyElement(elementLabel, tc.signals.join(' '));
+
+    // 51-type positive tests → expand to three scripts (2×, 3×, 4×)
+    if (['51P', '51G', '51N'].includes(protFn) && tc.pattern !== 'INHIBIT') {
+      const map = buildSettingsMap(relay);
+      return [2, 3, 4].map((M): { filename: string; content: string } => ({
+        filename: `${relay.tag}_${elementLabel}_${M}x.rts`,
+        content:  buildTOCConstantScript(protFn, map, relay, elementLabel, tc.sourceLines, tc.pattern, M),
+      }));
+    }
+
+    // All other elements (including 51 INHIBIT tests) → single script
+    return [{
+      filename: tc.pattern === 'INHIBIT'
+        ? `${relay.tag}_${tc.label}.rts`
+        : `${relay.tag}_${tc.label}_Pat${tc.pattern}.rts`,
+      content: renderAnalogScript(tc, relay),
+    }];
+  });
 }
