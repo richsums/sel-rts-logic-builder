@@ -155,40 +155,40 @@
 
 /* ?? SMUD: Clean Energy Grid ??????????????????????????????????????????????? */
 [data-theme="smud"] {
-  --c-bg-app:        #0A1A0F;
-  --c-bg-surface:    #0F2218;
-  --c-bg-surface-2:  #071510;
-  --c-bg-header:     #060F09;
-  --c-bg-nav:        #0F2218;
-  --c-bg-sidebar:    #071510;
-  --c-border:        #1A3D22;
-  --c-text-primary:  #F0FFF4;
-  --c-text-secondary:#90EE90;
-  --c-text-muted:    #3D6B45;
-  --c-accent:        #39D353;
-  --c-accent-hover:  #2ECC40;
-  --c-accent-text:   #030F06;
-  --c-accent-soft:   #0A2A12;
-  --c-accent-soft-t: #39D353;
-  --c-header-text:   #F0FFF4;
-  --c-header-sub:    #3D6B45;
-  --c-stat-hl:       #39D353;
-  --c-tab-active-b:  #39D353;
-  --c-tab-active-bg: rgba(57,211,83,0.1);
-  --c-tab-active-t:  #39D353;
-  --c-success:       #39D353;
-  --c-success-soft:  #0A2A12;
-  --c-warning:       #FFD700;
-  --c-warning-soft:  #1A1400;
-  --c-danger:        #CC3333;
+  --c-bg-app:        #1A0E08;
+  --c-bg-surface:    #2A1810;
+  --c-bg-surface-2:  #150B05;
+  --c-bg-header:     #0F0804;
+  --c-bg-nav:        #2A1810;
+  --c-bg-sidebar:    #150B05;
+  --c-border:        #F05A28;
+  --c-text-primary:  #FFFFFF;
+  --c-text-secondary:#FFB347;
+  --c-text-muted:    #7A4030;
+  --c-accent:        #F05A28;
+  --c-accent-hover:  #D04A18;
+  --c-accent-text:   #FFFFFF;
+  --c-accent-soft:   #2A1000;
+  --c-accent-soft-t: #F05A28;
+  --c-header-text:   #FFFFFF;
+  --c-header-sub:    #FFB347;
+  --c-stat-hl:       #F05A28;
+  --c-tab-active-b:  #F05A28;
+  --c-tab-active-bg: rgba(240,90,40,0.12);
+  --c-tab-active-t:  #F05A28;
+  --c-success:       #F05A28;
+  --c-success-soft:  #2A1000;
+  --c-warning:       #FFB347;
+  --c-warning-soft:  #1A0E00;
+  --c-danger:        #FF2200;
   --c-danger-soft:   #1A0000;
-  --c-danger-border: #CC3333;
-  --c-code-bg:       #0A1A0F;
-  --c-scrollbar:     #1A3D22;
-  --c-gate-and:      #39D353;
-  --c-gate-or:       #7FFF00;
-  --c-gate-not:      #FFD700;
-  --c-gate-edge:     #00FF88;
+  --c-danger-border: #FF2200;
+  --c-code-bg:       #1A0E08;
+  --c-scrollbar:     #3A2010;
+  --c-gate-and:      #F05A28;
+  --c-gate-or:       #FFB347;
+  --c-gate-not:      #FF2200;
+  --c-gate-edge:     #FFFFFF;
 }
 
 /* ?? PG&E: Pacific Coast Utility ??????????????????????????????????????????? */
