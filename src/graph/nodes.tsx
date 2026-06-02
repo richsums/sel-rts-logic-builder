@@ -395,8 +395,7 @@ const GATE_COLORS: Record<GateType, string> = {
 };
 
 // Theme-specific gate SVG shapes
-type GateShape = { viewBox: string; path: string; circle?: { cx: number; cy: number; r: number } };
-const gateShapes: Record<string, Record<string, GateShape>> = {
+const gateShapes: Record<string, Record<string, { viewBox: string; path: string; circle?: { cx: number; cy: number; r: number } }>> = {
   default: {
     and:  { viewBox: '0 0 48 32', path: 'M 4,4 L 22,4 Q 44,4 44,16 Q 44,28 22,28 L 4,28 Z' },
     or:   { viewBox: '0 0 48 32', path: 'M 4,4 Q 14,4 44,16 Q 14,28 4,28 Q 14,16 4,4 Z' },
