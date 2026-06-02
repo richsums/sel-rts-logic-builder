@@ -26,8 +26,8 @@ export interface AnimatedLogicEdgeData {
 
 function edgeColor(state: 0 | 1, isNot: boolean, pulsing: boolean): string {
   if (pulsing) return '#ffffff';
-  if (isNot)   return state === 1 ? '#f97316' : '#fbbf24'; // amber for NOT
-  return state === 1 ? '#00ff88' : '#94a3b8';              // green / gray
+  if (isNot)   return state === 1 ? 'var(--edge-not)' : 'var(--edge-timing)';
+  return state === 1 ? 'var(--edge-asserted)' : 'var(--edge-deasserted)';
 }
 
 function strokeWidth(state: 0 | 1, isNot: boolean): number {

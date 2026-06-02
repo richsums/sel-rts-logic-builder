@@ -12,6 +12,7 @@
  */
 
 import React, { useCallback } from 'react';
+import { useThemeStore } from '../store/theme';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { Lock } from 'lucide-react';
 import type { NodeDisplayInfo, DisplaySetting } from './displaySettings';
@@ -47,13 +48,13 @@ export interface OutputContactNodeData {
 
 function stateGlow(state: 0 | 1, animState: string): React.CSSProperties {
   if (animState === 'trip-pulse') {
-    return { boxShadow: '0 0 0 3px #ef4444, 0 0 16px 6px #ef444466' };
+    return { boxShadow: '0 0 0 3px var(--trip), 0 0 16px 6px color-mix(in srgb, var(--trip) 40%, transparent)' };
   }
   if (animState === 'flash-on' || (state === 1 && animState === 'idle')) {
-    return { boxShadow: '0 0 0 2px #00ff88, 0 0 12px 4px #00ff8844' };
+    return { boxShadow: '0 0 0 2px var(--asserted), 0 0 12px 4px color-mix(in srgb, var(--asserted) 27%, transparent)' };
   }
   if (animState === 'blocked') {
-    return { boxShadow: '0 0 0 2px #f97316, 0 0 10px 3px #f9731644' };
+    return { boxShadow: '0 0 0 2px var(--blocked), 0 0 10px 3px color-mix(in srgb, var(--blocked) 27%, transparent)' };
   }
   return {};
 }
@@ -126,8 +127,10 @@ function SettingsRows({ settings }: { settings: DisplaySetting[] }) {
 
 // ─── Handles ─────────────────────────────────────────────────────────────────
 
-const inputHandle  = <Handle type="target" position={Position.Left}  style={{ background: '#94a3b8', width: 8, height: 8 }} />;
-const outputHandle = <Handle type="source" position={Position.Right} style={{ background: '#94a3b8', width: 8, height: 8 }} />;
+// Invisible handles: functional connection points, no dot marker (dots = NOT bubble in IEEE/IEC notation)
+const HANDLE_STYLE: React.CSSProperties = { background: 'transparent', border: 'none', width: 8, height: 8 };
+const inputHandle  = <Handle type="target" position={Position.Left}  style={HANDLE_STYLE} />;
+const outputHandle = <Handle type="source" position={Position.Right} style={HANDLE_STYLE} />;
 
 // ─── ProtectionElementNode ────────────────────────────────────────────────────
 
@@ -141,14 +144,14 @@ export function ProtectionElementNode({ id, data }: NodeProps<GraphNodeData>) {
 
   return (
     <div
-      className="rounded-lg bg-white text-slate-800 min-w-[140px] max-w-[180px] transition-shadow duration-200"
-      style={{ border: `2px solid ${border}`, padding: '6px 10px', ...glowStyle }}
+      className="rounded-lg min-w-[140px] max-w-[180px] transition-shadow duration-200"
+      style={{ border: `2px solid ${border}`, padding: '6px 10px', background: 'var(--surface, white)', color: 'var(--text, #0f172a)', ...glowStyle }}
     >
       {inputHandle}
       {/* Header */}
       <div className="flex items-start justify-between gap-1 mb-1">
         <div className="min-w-0">
-          <div className="text-xs font-bold font-mono text-slate-800 truncate">
+          <div className="text-xs font-bold font-mono truncate">
             {displayInfo.icon} {id}
           </div>
           <div className="text-xs text-slate-400 truncate leading-tight">{displayInfo.subtitle}</div>
@@ -196,8 +199,8 @@ export function TimerNode({ id, data }: NodeProps<GraphNodeData>) {
 
   return (
     <div
-      className="rounded-lg bg-white text-slate-800 min-w-[130px] max-w-[170px] transition-shadow duration-200"
-      style={{ border: `2px solid ${border}`, padding: '6px 10px', ...stateGlow(signalState, animState) }}
+      className="rounded-lg min-w-[130px] max-w-[170px] transition-shadow duration-200"
+      style={{ border: `2px solid ${border}`, padding: '6px 10px', background: 'var(--surface, white)', color: 'var(--text, #0f172a)', ...stateGlow(signalState, animState) }}
     >
       {inputHandle}
       <div className="flex items-center gap-2 mb-1">
@@ -240,8 +243,8 @@ export function LatchNode({ id, data }: NodeProps<GraphNodeData>) {
 
   return (
     <div
-      className="rounded-lg bg-white text-slate-800 min-w-[130px] max-w-[170px] transition-shadow duration-200"
-      style={{ border: `2px solid ${border}`, padding: '6px 10px', ...stateGlow(signalState, animState) }}
+      className="rounded-lg min-w-[130px] max-w-[170px] transition-shadow duration-200"
+      style={{ border: `2px solid ${border}`, padding: '6px 10px', background: 'var(--surface, white)', color: 'var(--text, #0f172a)', ...stateGlow(signalState, animState) }}
     >
       {inputHandle}
       <div className="flex items-start justify-between gap-1">
@@ -272,8 +275,8 @@ export function LogicGateNode({ id, data }: NodeProps<GraphNodeData>) {
 
   return (
     <div
-      className="rounded-lg bg-slate-50 text-slate-700 min-w-[110px] max-w-[160px] transition-shadow duration-200"
-      style={{ border: `1.5px solid ${border}`, padding: '5px 8px', ...stateGlow(signalState, animState) }}
+      className="rounded-lg min-w-[110px] max-w-[160px] transition-shadow duration-200"
+      style={{ border: `1.5px solid ${border}`, padding: '5px 8px', background: 'var(--surface-alt, #f8fafc)', color: 'var(--text, #334155)', ...stateGlow(signalState, animState) }}
     >
       {inputHandle}
       <div className="flex items-center justify-between gap-1">
@@ -301,8 +304,8 @@ export function InputSignalNode({ id, data }: NodeProps<GraphNodeData>) {
 
   return (
     <div
-      className="rounded-lg bg-blue-50 text-blue-800 min-w-[110px] max-w-[150px] transition-shadow duration-200"
-      style={{ border: `2px solid ${border}`, padding: '5px 8px', ...stateGlow(signalState, animState) }}
+      className="rounded-lg min-w-[110px] max-w-[150px] transition-shadow duration-200"
+      style={{ border: `2px solid ${border}`, padding: '5px 8px', background: 'var(--surface, #eff6ff)', color: 'var(--text-accent, #1e40af)', ...stateGlow(signalState, animState) }}
     >
       <div className="flex items-center justify-between gap-1">
         <div className="min-w-0">
@@ -385,11 +388,56 @@ export interface GateNodeData {
 }
 
 const GATE_COLORS: Record<GateType, string> = {
-  and:  '#00d4ff',
-  or:   '#9966ff',
-  not:  '#ffaa00',
-  edge: '#00ffff',
+  and:  'var(--gate-and, #00d4ff)',
+  or:   'var(--gate-or, #9966ff)',
+  not:  'var(--gate-not, #ffaa00)',
+  edge: 'var(--gate-edge, #00ffff)',
 };
+
+// Theme-specific gate SVG shapes
+const gateShapes: Record<string, Record<string, any>> = {
+  default: {
+    and:  { viewBox: '0 0 48 32', path: 'M 4,4 L 22,4 Q 44,4 44,16 Q 44,28 22,28 L 4,28 Z' },
+    or:   { viewBox: '0 0 48 32', path: 'M 4,4 Q 14,4 44,16 Q 14,28 4,28 Q 14,16 4,4 Z' },
+    not:  { viewBox: '0 0 48 32', path: 'M 4,4 L 38,16 L 4,28 Z', circle: {cx:43,cy:16,r:5} },
+    edge: { viewBox: '0 0 48 32', path: 'M 4,4 L 4,28 L 44,28 L 44,4 Z M 14,24 L 14,12 L 26,12 L 26,24' },
+  },
+  smud: {
+    and:  { viewBox: '0 0 48 32', path: 'M 4,6 Q 8,4 22,4 Q 46,4 46,16 Q 46,28 22,28 Q 8,28 4,26 Q 10,16 4,6 Z' },
+    or:   { viewBox: '0 0 48 32', path: 'M 4,4 Q 16,6 44,16 Q 16,26 4,28 Q 12,20 10,16 Q 12,12 4,4 Z' },
+    not:  { viewBox: '0 0 48 32', path: 'M 4,6 L 36,16 L 4,26 Q 8,16 4,6 Z', circle: {cx:43,cy:16,r:5} },
+    edge: { viewBox: '0 0 48 32', path: 'M 4,4 L 4,28 L 44,28 L 44,4 Z M 12,24 L 12,14 Q 16,8 24,8 L 24,14 L 36,14 L 36,24' },
+  },
+  pge: {
+    and:  { viewBox: '0 0 48 32', path: 'M 4,4 L 20,4 Q 44,4 44,16 Q 44,28 20,28 L 4,28 Z' },
+    or:   { viewBox: '0 0 48 32', path: 'M 4,4 Q 14,4 44,16 Q 14,28 4,28 Q 14,16 4,4 Z' },
+    not:  { viewBox: '0 0 48 32', path: 'M 4,4 L 38,16 L 4,28 Z', circle: {cx:43,cy:16,r:5} },
+    edge: { viewBox: '0 0 48 32', path: 'M 4,4 L 4,28 L 44,28 L 44,4 Z M 14,24 L 14,12 L 26,12 L 26,24' },
+  },
+  blueprint: {
+    and:  { viewBox: '0 0 48 32', path: 'M 4,4 L 44,4 L 44,28 L 4,28 Z', label: '&' },
+    or:   { viewBox: '0 0 48 32', path: 'M 4,4 L 44,4 L 44,28 L 4,28 Z', label: '≥1' },
+    not:  { viewBox: '0 0 48 32', path: 'M 4,4 L 44,4 L 44,28 L 4,28 Z', label: '1', circle: {cx:50,cy:16,r:4} },
+    edge: { viewBox: '0 0 48 32', path: 'M 4,4 L 44,4 L 44,28 L 4,28 Z', label: '↑' },
+  },
+  'neon-grid': {
+    and:  { viewBox: '0 0 48 32', path: 'M 4,2 L 44,2 L 44,30 L 4,30 Z', label: 'AND', sublabel: 'U1' },
+    or:   { viewBox: '0 0 48 32', path: 'M 4,2 L 44,2 L 44,30 L 4,30 Z', label: 'OR', sublabel: 'U2' },
+    not:  { viewBox: '0 0 48 32', path: 'M 4,2 L 44,2 L 44,30 L 4,30 Z', label: 'INV', sublabel: 'U3', circle: {cx:50,cy:16,r:3} },
+    edge: { viewBox: '0 0 48 32', path: 'M 4,2 L 44,2 L 44,30 L 4,30 Z', label: 'CLK↑', sublabel: 'U4' },
+  },
+  illuminated: {
+    and:  { viewBox: '0 0 48 40', path: 'M 24,4 L 44,12 L 44,28 L 24,36 L 4,28 L 4,12 Z' },
+    or:   { viewBox: '0 0 48 48', path: 'M 24,4 Q 34,14 44,24 Q 34,34 24,44 Q 14,34 4,24 Q 14,14 24,4 Z' },
+    not:  { viewBox: '0 0 48 32', path: 'M 24,4 L 44,28 L 4,28 Z', circle: {cx:24,cy:36,r:5} },
+    edge: { viewBox: '0 0 48 32', path: 'M 24,28 L 4,28 L 24,4 L 44,28 Z M 24,4 L 24,0' },
+  },
+};
+
+function getGateShape(theme: string, type: GateType) {
+  return (gateShapes[theme] ?? gateShapes['default'])[type] ?? gateShapes['default'][type];
+}
+
 
 const GATE_LABELS: Record<GateType, string> = {
   and:  'AND',
@@ -398,57 +446,36 @@ const GATE_LABELS: Record<GateType, string> = {
   edge: '↑EDGE',
 };
 
-/** SVG body for each gate type.  All viewBox "0 0 48 32". */
-function GateShape({ type, active }: { type: GateType; active: boolean }) {
-  const color = GATE_COLORS[type];
-  const fill  = active ? `${color}22` : 'transparent';
+/** SVG body for each gate type - theme-aware. */
+function GateShape({ type, active, theme }: { type: GateType; active: boolean; theme: string }) {
+  const color  = GATE_COLORS[type];
+  const fill   = active ? `${color}22` : 'transparent';
   const stroke = color;
-
-  switch (type) {
-    // AND gate — flat left, semicircle right
-    case 'and':
-      return (
-        <path
-          d="M4,4 L22,4 A12,12 0 0,1 22,28 L4,28 Z"
-          fill={fill} stroke={stroke} strokeWidth="2.5" strokeLinejoin="round"
+  const shape  = getGateShape(theme, type);
+  return (
+    <>
+      <path
+        d={shape.path}
+        fill={fill} stroke={stroke} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"
+      />
+      {shape.circle && (
+        <circle
+          cx={shape.circle.cx} cy={shape.circle.cy} r={shape.circle.r}
+          fill={fill} stroke={stroke} strokeWidth="2"
         />
-      );
-
-    // OR gate — concave left, pointed right
-    case 'or':
-      return (
-        <path
-          d="M4,4 Q14,16 4,28 Q18,24 30,16 Q18,8 4,4 Z"
-          fill={fill} stroke={stroke} strokeWidth="2.5" strokeLinejoin="round"
-        />
-      );
-
-    // NOT gate — triangle + bubble
-    case 'not':
-      return (
-        <>
-          <path
-            d="M4,4 L28,16 L4,28 Z"
-            fill={fill} stroke={stroke} strokeWidth="2.5" strokeLinejoin="round"
-          />
-          <circle cx="31" cy="16" r="3" fill={fill} stroke={stroke} strokeWidth="2" />
-        </>
-      );
-
-    // EDGE detector — rising-edge waveform icon
-    case 'edge':
-      return (
-        <polyline
-          points="4,24 16,24 16,8 28,8 28,24 38,24"
-          fill="none" stroke={stroke} strokeWidth="2.5"
-          strokeLinecap="round" strokeLinejoin="round"
-        />
-      );
-  }
+      )}
+      {shape.label && (
+        <text x="24" y="20" textAnchor="middle" fontSize="9" fontFamily="monospace" fontWeight="bold" fill={stroke}>{shape.label}</text>
+      )}
+      {shape.sublabel && (
+        <text x="24" y="29" textAnchor="middle" fontSize="6" fontFamily="monospace" fill={stroke} opacity={0.6}>{shape.sublabel}</text>
+      )}
+    </>
+  );
 }
-
-export function LogicGateSymbolNode({ id, data }: NodeProps<GateNodeData>) {
+export function LogicGateSymbolNode({ id: _id, data }: NodeProps<GateNodeData>) {
   const { gateType, inputCount, signalState, animState } = data;
+  const { theme } = useThemeStore();
   const color  = GATE_COLORS[gateType];
   const active = signalState === 1;
   const glowStyle = active
@@ -471,18 +498,18 @@ export function LogicGateSymbolNode({ id, data }: NodeProps<GateNodeData>) {
       {/* Input handles */}
       <Handle
         type="target" position={Position.Left} id="a"
-        style={{ background: color, width: 7, height: 7, ...inputHandleA }}
+        style={{ background: 'transparent', border: 'none', width: 8, height: 8, ...inputHandleA }}
       />
       {inputCount === 2 && (
         <Handle
           type="target" position={Position.Left} id="b"
-          style={{ background: color, width: 7, height: 7, ...inputHandleB }}
+          style={{ background: 'transparent', border: 'none', width: 8, height: 8, ...inputHandleB }}
         />
       )}
 
       {/* Gate SVG body */}
       <svg viewBox="0 0 48 32" width={56} height={38} style={{ overflow: 'visible' }}>
-        <GateShape type={gateType} active={active} />
+        <GateShape type={gateType} active={active} theme={theme} />
 
         {/* Gate label inside shape */}
         <text
@@ -500,7 +527,7 @@ export function LogicGateSymbolNode({ id, data }: NodeProps<GateNodeData>) {
       {/* Output handle */}
       <Handle
         type="source" position={Position.Right}
-        style={{ background: color, width: 7, height: 7, top: '50%', transform: 'translateY(-50%)' }}
+        style={{ background: 'transparent', border: 'none', width: 8, height: 8, top: '50%', transform: 'translateY(-50%)' }}
       />
     </div>
   );
@@ -529,7 +556,7 @@ export function OutputContactNode({ id, data }: NodeProps<OutputContactNodeData>
     <div
       className="rounded-lg text-white min-w-[130px] max-w-[160px] transition-all duration-200"
       style={{
-        background:  isAsserted ? '#0f2b1e' : '#1e293b',
+        background: isAsserted ? 'var(--surface, #0f2b1e)' : 'var(--surface-alt, #1e293b)',
         border:      `2px solid ${borderColor}`,
         padding:     '6px 10px',
         ...animGlow,

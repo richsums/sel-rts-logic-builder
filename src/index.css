@@ -1,87 +1,456 @@
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Cinzel:wght@400;700&family=Montserrat:wght@400;600;700&family=Special+Elite&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ?? Theme CSS Variables ??????????????????????????????????????????????????? */
+:root, [data-theme="light"] {
+  --c-bg-app:        #f1f5f9;
+  --c-bg-surface:    #ffffff;
+  --c-bg-surface-2:  #f8fafc;
+  --c-bg-header:     #1a3a5c;
+  --c-bg-nav:        #ffffff;
+  --c-bg-sidebar:    #f8fafc;
+  --c-border:        #e2e8f0;
+  --c-text-primary:  #0f172a;
+  --c-text-secondary:#64748b;
+  --c-text-muted:    #94a3b8;
+  --c-accent:        #2563eb;
+  --c-accent-hover:  #1d4ed8;
+  --c-accent-text:   #ffffff;
+  --c-accent-soft:   #eff6ff;
+  --c-accent-soft-t: #1d4ed8;
+  --c-header-text:   #ffffff;
+  --c-header-sub:    #bfdbfe;
+  --c-stat-hl:       #e8b84b;
+  --c-tab-active-b:  #2563eb;
+  --c-tab-active-bg: rgba(239,246,255,0.6);
+  --c-tab-active-t:  #1d4ed8;
+  --c-success:       #16a34a;
+  --c-success-soft:  #f0fdf4;
+  --c-warning:       #d97706;
+  --c-warning-soft:  #fffbeb;
+  --c-danger:        #dc2626;
+  --c-danger-soft:   #fef2f2;
+  --c-danger-border: #fecaca;
+  --c-code-bg:       #f1f5f9;
+  --c-scrollbar:     #cbd5e1;
+  --c-gate-and:      #0ea5e9;
+  --c-gate-or:       #7c3aed;
+  --c-gate-not:      #d97706;
+  --c-gate-edge:     #06b6d4;
+}
+
+[data-theme="dark"] {
+  --c-bg-app:        #0D1117;
+  --c-bg-surface:    #161B22;
+  --c-bg-surface-2:  #0D1117;
+  --c-bg-header:     #090c14;
+  --c-bg-nav:        #161B22;
+  --c-bg-sidebar:    #0D1117;
+  --c-border:        #30363D;
+  --c-text-primary:  #E6EDF3;
+  --c-text-secondary:#8B949E;
+  --c-text-muted:    #484F58;
+  --c-accent:        #58A6FF;
+  --c-accent-hover:  #388bfd;
+  --c-accent-text:   #ffffff;
+  --c-accent-soft:   #1e2d4a;
+  --c-accent-soft-t: #58A6FF;
+  --c-header-text:   #E6EDF3;
+  --c-header-sub:    #4A6785;
+  --c-stat-hl:       #f59e0b;
+  --c-tab-active-b:  #58A6FF;
+  --c-tab-active-bg: rgba(88,166,255,0.1);
+  --c-tab-active-t:  #58A6FF;
+  --c-success:       #3fb950;
+  --c-success-soft:  #031a0a;
+  --c-warning:       #d29922;
+  --c-warning-soft:  #1a1200;
+  --c-danger:        #FF4444;
+  --c-danger-soft:   #1a0000;
+  --c-danger-border: #7f1d1d;
+  --c-code-bg:       #0D1117;
+  --c-scrollbar:     #30363D;
+  --c-gate-and:      #58A6FF;
+  --c-gate-or:       #a78bfa;
+  --c-gate-not:      #d29922;
+  --c-gate-edge:     #22d3ee;
+}
+
+[data-theme="contrast"] {
+  --c-bg-app:        #000000;
+  --c-bg-surface:    #000000;
+  --c-bg-surface-2:  #0d0d0d;
+  --c-bg-header:     #000000;
+  --c-bg-nav:        #000000;
+  --c-bg-sidebar:    #0d0d0d;
+  --c-border:        #ffffff;
+  --c-text-primary:  #ffffff;
+  --c-text-secondary:#dddddd;
+  --c-text-muted:    #aaaaaa;
+  --c-accent:        #ffff00;
+  --c-accent-hover:  #e6e600;
+  --c-accent-text:   #000000;
+  --c-accent-soft:   #1a1a00;
+  --c-accent-soft-t: #ffff00;
+  --c-header-text:   #ffffff;
+  --c-header-sub:    #cccccc;
+  --c-stat-hl:       #ffff00;
+  --c-tab-active-b:  #ffff00;
+  --c-tab-active-bg: #1a1a00;
+  --c-tab-active-t:  #ffff00;
+  --c-success:       #00ff00;
+  --c-success-soft:  #001a00;
+  --c-warning:       #ff8800;
+  --c-warning-soft:  #1a0800;
+  --c-danger:        #ff3333;
+  --c-danger-soft:   #1a0000;
+  --c-danger-border: #ff3333;
+  --c-code-bg:       #0d0d0d;
+  --c-scrollbar:     #ffffff;
+  --c-gate-and:      #00ffff;
+  --c-gate-or:       #ffff00;
+  --c-gate-not:      #ff8800;
+  --c-gate-edge:     #00ff00;
+}
+
+[data-theme="midnight"] {
+  --c-bg-app:        #060d1a;
+  --c-bg-surface:    #0d1826;
+  --c-bg-surface-2:  #0a1220;
+  --c-bg-header:     #030810;
+  --c-bg-nav:        #0d1826;
+  --c-bg-sidebar:    #0a1220;
+  --c-border:        #1a3055;
+  --c-text-primary:  #c8d8ea;
+  --c-text-secondary:#6690aa;
+  --c-text-muted:    #3a5570;
+  --c-accent:        #00d4ff;
+  --c-accent-hover:  #00b8dd;
+  --c-accent-text:   #000d1a;
+  --c-accent-soft:   #00203a;
+  --c-accent-soft-t: #00d4ff;
+  --c-header-text:   #c8d8ea;
+  --c-header-sub:    #3a6080;
+  --c-stat-hl:       #00d4ff;
+  --c-tab-active-b:  #00d4ff;
+  --c-tab-active-bg: rgba(0,212,255,0.08);
+  --c-tab-active-t:  #00d4ff;
+  --c-success:       #00ff88;
+  --c-success-soft:  #001a0e;
+  --c-warning:       #ffaa00;
+  --c-warning-soft:  #1a0e00;
+  --c-danger:        #ff4455;
+  --c-danger-soft:   #1a0010;
+  --c-danger-border: #ff4455;
+  --c-code-bg:       #060d1a;
+  --c-scrollbar:     #1a3055;
+  --c-gate-and:      #00d4ff;
+  --c-gate-or:       #9966ff;
+  --c-gate-not:      #ffaa00;
+  --c-gate-edge:     #00ffff;
+}
+
+/* ?? SMUD: Clean Energy Grid ??????????????????????????????????????????????? */
+[data-theme="smud"] {
+  --c-bg-app:        #0A1A0F;
+  --c-bg-surface:    #0F2218;
+  --c-bg-surface-2:  #071510;
+  --c-bg-header:     #060F09;
+  --c-bg-nav:        #0F2218;
+  --c-bg-sidebar:    #071510;
+  --c-border:        #1A3D22;
+  --c-text-primary:  #F0FFF4;
+  --c-text-secondary:#90EE90;
+  --c-text-muted:    #3D6B45;
+  --c-accent:        #39D353;
+  --c-accent-hover:  #2ECC40;
+  --c-accent-text:   #030F06;
+  --c-accent-soft:   #0A2A12;
+  --c-accent-soft-t: #39D353;
+  --c-header-text:   #F0FFF4;
+  --c-header-sub:    #3D6B45;
+  --c-stat-hl:       #39D353;
+  --c-tab-active-b:  #39D353;
+  --c-tab-active-bg: rgba(57,211,83,0.1);
+  --c-tab-active-t:  #39D353;
+  --c-success:       #39D353;
+  --c-success-soft:  #0A2A12;
+  --c-warning:       #FFD700;
+  --c-warning-soft:  #1A1400;
+  --c-danger:        #CC3333;
+  --c-danger-soft:   #1A0000;
+  --c-danger-border: #CC3333;
+  --c-code-bg:       #0A1A0F;
+  --c-scrollbar:     #1A3D22;
+  --c-gate-and:      #39D353;
+  --c-gate-or:       #7FFF00;
+  --c-gate-not:      #FFD700;
+  --c-gate-edge:     #00FF88;
+}
+
+/* ?? PG&E: Pacific Coast Utility ??????????????????????????????????????????? */
+[data-theme="pge"] {
+  --c-bg-app:        #001A4E;
+  --c-bg-surface:    #002266;
+  --c-bg-surface-2:  #001540;
+  --c-bg-header:     #000D2E;
+  --c-bg-nav:        #002266;
+  --c-bg-sidebar:    #001540;
+  --c-border:        #003087;
+  --c-text-primary:  #FFFFFF;
+  --c-text-secondary:#99AACC;
+  --c-text-muted:    #445580;
+  --c-accent:        #F37C20;
+  --c-accent-hover:  #E06A10;
+  --c-accent-text:   #FFFFFF;
+  --c-accent-soft:   #2A1500;
+  --c-accent-soft-t: #F37C20;
+  --c-header-text:   #FFFFFF;
+  --c-header-sub:    #6699CC;
+  --c-stat-hl:       #F37C20;
+  --c-tab-active-b:  #F37C20;
+  --c-tab-active-bg: rgba(243,124,32,0.12);
+  --c-tab-active-t:  #F37C20;
+  --c-success:       #F37C20;
+  --c-success-soft:  #1A0A00;
+  --c-warning:       #FFB800;
+  --c-warning-soft:  #1A1000;
+  --c-danger:        #FF2222;
+  --c-danger-soft:   #1A0000;
+  --c-danger-border: #FF2222;
+  --c-code-bg:       #001A4E;
+  --c-scrollbar:     #003087;
+  --c-gate-and:      #F37C20;
+  --c-gate-or:       #FFB800;
+  --c-gate-not:      #F37C20;
+  --c-gate-edge:     #FFD700;
+}
+
+/* ?? Blueprint: Engineering Drawing ??????????????????????????????????????? */
+[data-theme="blueprint"] {
+  --c-bg-app:        #002855;
+  --c-bg-surface:    #003D6B;
+  --c-bg-surface-2:  #002050;
+  --c-bg-header:     #001840;
+  --c-bg-nav:        #003D6B;
+  --c-bg-sidebar:    #002050;
+  --c-border:        #4488AA;
+  --c-text-primary:  #FFFFFF;
+  --c-text-secondary:#A0C4E0;
+  --c-text-muted:    #4477AA;
+  --c-accent:        #FFD700;
+  --c-accent-hover:  #FFC500;
+  --c-accent-text:   #002855;
+  --c-accent-soft:   #1A1400;
+  --c-accent-soft-t: #FFD700;
+  --c-header-text:   #FFFFFF;
+  --c-header-sub:    #80BBDD;
+  --c-stat-hl:       #FFD700;
+  --c-tab-active-b:  #FFD700;
+  --c-tab-active-bg: rgba(255,215,0,0.1);
+  --c-tab-active-t:  #FFD700;
+  --c-success:       #FFFFFF;
+  --c-success-soft:  #003366;
+  --c-warning:       #FFD700;
+  --c-warning-soft:  #1A1400;
+  --c-danger:        #FF4444;
+  --c-danger-soft:   #1A0000;
+  --c-danger-border: #FF4444;
+  --c-code-bg:       #002855;
+  --c-scrollbar:     #4488AA;
+  --c-gate-and:      #FFFFFF;
+  --c-gate-or:       #FFFFFF;
+  --c-gate-not:      #FFD700;
+  --c-gate-edge:     #00FFFF;
+}
+
+/* ?? Neon Grid: Cyberpunk Circuit Board ???????????????????????????????????? */
+[data-theme="neon"] {
+  --c-bg-app:        #050510;
+  --c-bg-surface:    #080818;
+  --c-bg-surface-2:  #030308;
+  --c-bg-header:     #020208;
+  --c-bg-nav:        #080818;
+  --c-bg-sidebar:    #030308;
+  --c-border:        #7700FF;
+  --c-text-primary:  #00FFFF;
+  --c-text-secondary:#00AAAA;
+  --c-text-muted:    #005555;
+  --c-accent:        #00FF41;
+  --c-accent-hover:  #00DD38;
+  --c-accent-text:   #050510;
+  --c-accent-soft:   #001A08;
+  --c-accent-soft-t: #00FF41;
+  --c-header-text:   #00FFFF;
+  --c-header-sub:    #006666;
+  --c-stat-hl:       #00FF41;
+  --c-tab-active-b:  #00FF41;
+  --c-tab-active-bg: rgba(0,255,65,0.08);
+  --c-tab-active-t:  #00FF41;
+  --c-success:       #00FF41;
+  --c-success-soft:  #001A08;
+  --c-warning:       #FF6600;
+  --c-warning-soft:  #1A0800;
+  --c-danger:        #FF00AA;
+  --c-danger-soft:   #1A0010;
+  --c-danger-border: #FF00AA;
+  --c-code-bg:       #050510;
+  --c-scrollbar:     #7700FF;
+  --c-gate-and:      #00FF41;
+  --c-gate-or:       #AA00FF;
+  --c-gate-not:      #FFAA00;
+  --c-gate-edge:     #00FFFF;
+}
+
+/* ?? Illuminated Manuscript: Medieval Relay Logic ?????????????????????????? */
+[data-theme="illuminated"] {
+  --c-bg-app:        #1A0F00;
+  --c-bg-surface:    #2D1810;
+  --c-bg-surface-2:  #150C00;
+  --c-bg-header:     #110900;
+  --c-bg-nav:        #2D1810;
+  --c-bg-sidebar:    #150C00;
+  --c-border:        #DAA520;
+  --c-text-primary:  #FFD700;
+  --c-text-secondary:#F5DEB3;
+  --c-text-muted:    #8B6914;
+  --c-accent:        #DAA520;
+  --c-accent-hover:  #C8960E;
+  --c-accent-text:   #1A0F00;
+  --c-accent-soft:   #2A1A00;
+  --c-accent-soft-t: #FFD700;
+  --c-header-text:   #FFD700;
+  --c-header-sub:    #8B6914;
+  --c-stat-hl:       #FFD700;
+  --c-tab-active-b:  #DAA520;
+  --c-tab-active-bg: rgba(218,165,32,0.15);
+  --c-tab-active-t:  #FFD700;
+  --c-success:       #FFD700;
+  --c-success-soft:  #1A0F00;
+  --c-warning:       #FF8C00;
+  --c-warning-soft:  #1A0A00;
+  --c-danger:        #CC2200;
+  --c-danger-soft:   #1A0000;
+  --c-danger-border: #CC2200;
+  --c-code-bg:       #1A0F00;
+  --c-scrollbar:     #DAA520;
+  --c-gate-and:      #DAA520;
+  --c-gate-or:       #DAA520;
+  --c-gate-not:      #CC2200;
+  --c-gate-edge:     #DAA520;
+}
+
+/* ?? Base ?????????????????????????????????????????????????????????????????? */
 @layer base {
   html, body, #root {
     height: 100%;
     overflow: hidden;
   }
-
   body {
-    @apply bg-slate-100 text-slate-900;
+    background-color: var(--c-bg-app);
+    color: var(--c-text-primary);
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
   }
-
-  /* Monaco editor wrapper */
-  .monaco-editor-container {
-    height: 100%;
+  [data-theme="blueprint"] body,
+  [data-theme="blueprint"] .font-sans {
+    font-family: 'Courier New', 'Courier', monospace;
+    letter-spacing: 0.03em;
   }
+  [data-theme="neon"] body,
+  [data-theme="neon"] .font-sans {
+    font-family: 'Share Tech Mono', monospace;
+    letter-spacing: 0.05em;
+  }
+  [data-theme="illuminated"] body,
+  [data-theme="illuminated"] .font-sans {
+    font-family: 'Palatino Linotype', 'Palatino', serif;
+  }
+  .monaco-editor-container { height: 100%; }
 }
 
 @layer utilities {
   .scrollbar-thin {
     scrollbar-width: thin;
-    scrollbar-color: #cbd5e1 transparent;
+    scrollbar-color: var(--c-scrollbar) transparent;
   }
-
-  .scrollbar-thin::-webkit-scrollbar {
-    width: 6px;
-  }
-
+  .scrollbar-thin::-webkit-scrollbar { width: 6px; }
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    @apply rounded-full bg-slate-300;
+    border-radius: 9999px;
+    background-color: var(--c-scrollbar);
   }
 }
 
-/* ReactFlow overrides */
-.react-flow__attribution {
-  display: none;
+/* ?? Blueprint grid background ?????????????????????????????????????????????? */
+[data-theme="blueprint"] .react-flow__background {
+  background-color: #002855 !important;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.07) 1px, transparent 1px) !important;
+  background-size: 20px 20px !important;
 }
 
-/* ── Graph simulation animations ────────────────────────────────────────────── */
-
-/* Node state glow transitions */
-.react-flow__node {
-  transition: filter 0.15s ease, box-shadow 0.15s ease;
+/* ?? Neon grid background + scanline overlay ???????????????????????????????? */
+[data-theme="neon"] .react-flow__background {
+  background-color: #050510 !important;
+  background-image:
+    linear-gradient(rgba(0,255,65,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,255,65,0.04) 1px, transparent 1px) !important;
+  background-size: 30px 30px !important;
+}
+[data-theme="neon"] #root::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.03) 2px,
+    rgba(0,0,0,0.03) 3px
+  );
+  pointer-events: none;
+  z-index: 9999;
 }
 
-/* Trip ripple — 3 expanding rings */
+/* ?? Illuminated background ????????????????????????????????????????????????? */
+[data-theme="illuminated"] .react-flow__background {
+  background-color: #1A0F00 !important;
+  background-image: radial-gradient(ellipse at center, #2D1810 0%, #1A0F00 70%) !important;
+}
+
+/* ?? SMUD background ???????????????????????????????????????????????????????? */
+[data-theme="smud"] .react-flow__background {
+  background-color: #0A1A0F !important;
+  background-image: radial-gradient(ellipse at 50% 30%, #0F2A18 0%, #0A1A0F 65%) !important;
+}
+
+/* ReactFlow */
+.react-flow__attribution { display: none; }
+
+/* ?? Graph simulation animations ??????????????????????????????????????????? */
+.react-flow__node { transition: filter 0.15s ease, box-shadow 0.15s ease; }
 @keyframes tripRipple {
   0%   { box-shadow: 0 0 0 0 rgba(239,68,68,0.8), 0 0 0 0 rgba(239,68,68,0.5), 0 0 0 0 rgba(239,68,68,0.3); }
   100% { box-shadow: 0 0 0 8px rgba(239,68,68,0), 0 0 0 20px rgba(239,68,68,0), 0 0 0 36px rgba(239,68,68,0); }
 }
-
-.sel-node-trip-pulse {
-  animation: tripRipple 0.6s ease-out;
-}
-
-/* Node flash on → bright green pulse */
+.sel-node-trip-pulse { animation: tripRipple 0.6s ease-out; }
 @keyframes flashOn {
   0%   { box-shadow: 0 0 0 2px #00ff88, 0 0 20px 8px rgba(0,255,136,0.6); }
   100% { box-shadow: 0 0 0 2px #00ff88, 0 0 8px 3px rgba(0,255,136,0.2); }
 }
-
-.sel-node-flash-on {
-  animation: flashOn 0.15s ease-out forwards;
-}
-
-/* Node flash off → gray fade */
+.sel-node-flash-on { animation: flashOn 0.15s ease-out forwards; }
 @keyframes flashOff {
   0%   { box-shadow: 0 0 0 2px #94a3b8, 0 0 12px 4px rgba(148,163,184,0.4); }
   100% { box-shadow: none; }
 }
-
-.sel-node-flash-off {
-  animation: flashOff 0.15s ease-out forwards;
-}
-
-/* Blocked banner overlay */
+.sel-node-flash-off { animation: flashOff 0.15s ease-out forwards; }
 @keyframes blockedPulse {
   0%, 100% { opacity: 0.9; }
   50%       { opacity: 0.5; }
 }
-
 .sel-node-blocked::after {
   content: 'BLOCKED';
   position: absolute;
@@ -98,4 +467,13 @@
   animation: blockedPulse 0.3s ease-in-out 2;
   pointer-events: none;
   z-index: 10;
+}
+
+/* ?? Neon gate glow animation ??????????????????????????????????????????????? */
+@keyframes neonPulse {
+  0%, 100% { filter: drop-shadow(0 0 4px var(--c-gate-and)); }
+  50%       { filter: drop-shadow(0 0 10px var(--c-gate-and)); }
+}
+[data-theme="neon"] .logic-gate-active {
+  animation: neonPulse 2s ease-in-out infinite;
 }

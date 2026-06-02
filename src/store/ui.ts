@@ -5,6 +5,7 @@
  *  - Graph layout persistence (node positions, edges, viewport)
  *  - Logic simulation state (signal states, animation speed)
  *  - Notifications
+ *  - Script revision history (undo/redo)
  */
 
 import { create } from 'zustand';
@@ -21,6 +22,8 @@ export interface UIState {
   // ── Tab navigation ────────────────────────────────────────────────────────
   activeTab: ActiveTab;
   selectedScriptId: string | null;
+  /** Script ID to navigate to when Review mounts (set by Graph double-click). */
+  reviewJumpScriptId: string | null;
   graphLayoutDone: boolean;
   notification: { type: 'success' | 'error' | 'info'; message: string } | null;
 
@@ -48,9 +51,16 @@ export interface UIState {
   /** TC node ID → TimerState for all active timers. */
   timerStates: Record<string, TimerState>;
 
+  // ── Script revision history ───────────────────────────────────────────────
+  /** scriptId → content history stack */
+  scriptRevisions: Record<string, string[]>;
+  /** scriptId → current index into history stack */
+  scriptRevisionIdx: Record<string, number>;
+
   // ── Actions ───────────────────────────────────────────────────────────────
   setActiveTab: (tab: ActiveTab) => void;
   setSelectedScript: (id: string | null) => void;
+  setReviewJumpScript: (id: string | null) => void;
   setGraphLayoutDone: (done: boolean) => void;
   showNotification: (type: 'success' | 'error' | 'info', message: string) => void;
   clearNotification: () => void;
@@ -80,6 +90,17 @@ export interface UIState {
   setTimerState: (nodeId: string, state: TimerState) => void;
   /** Clear all timer states (called on relay switch). */
   clearTimerStates: () => void;
+
+  /** Push a new revision onto the history stack for a script. */
+  pushRevision: (scriptId: string, content: string) => void;
+  /** Undo: return previous content or null if at start of history. */
+  undoRevision: (scriptId: string) => string | null;
+  /** Redo: return next content or null if at end of history. */
+  redoRevision: (scriptId: string) => string | null;
+  /** Return true if undo is available for a script. */
+  canUndo: (scriptId: string) => boolean;
+  /** Return true if redo is available for a script. */
+  canRedo: (scriptId: string) => boolean;
 }
 
 // ─── Default viewport ─────────────────────────────────────────────────────────
@@ -88,12 +109,13 @@ const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 0.8 };
 
 // ─── Store ────────────────────────────────────────────────────────────────────
 
-export const useUIStore = create<UIState>((set) => ({
+export const useUIStore = create<UIState>((set, get) => ({
   // Tab navigation
-  activeTab:        'import',
-  selectedScriptId:  null,
-  graphLayoutDone:   false,
-  notification:      null,
+  activeTab:           'import',
+  selectedScriptId:    null,
+  reviewJumpScriptId:  null,
+  graphLayoutDone:     false,
+  notification:        null,
 
   // Graph state
   graphNodes:     [],
@@ -109,12 +131,17 @@ export const useUIStore = create<UIState>((set) => ({
   flashingNodes:   {},
   timerStates:     {},
 
+  // Revision history
+  scriptRevisions:   {},
+  scriptRevisionIdx: {},
+
   // ── Tab actions ────────────────────────────────────────────────────────────
-  setActiveTab:       (tab)  => set({ activeTab: tab }),
-  setSelectedScript:  (id)   => set({ selectedScriptId: id }),
-  setGraphLayoutDone: (done) => set({ graphLayoutDone: done }),
-  showNotification:   (type, message) => set({ notification: { type, message } }),
-  clearNotification:  ()     => set({ notification: null }),
+  setActiveTab:         (tab) => set({ activeTab: tab }),
+  setSelectedScript:    (id)  => set({ selectedScriptId: id }),
+  setReviewJumpScript:  (id)  => set({ reviewJumpScriptId: id }),
+  setGraphLayoutDone:   (done) => set({ graphLayoutDone: done }),
+  showNotification:     (type, message) => set({ notification: { type, message } }),
+  clearNotification:    ()    => set({ notification: null }),
 
   // ── Graph layout actions ───────────────────────────────────────────────────
   saveGraphLayout: (nodes, edges, viewport, projectId) =>
@@ -140,4 +167,53 @@ export const useUIStore = create<UIState>((set) => ({
   clearAnimations:    ()       => set({ pulsingEdgeIds: [], flashingNodes: {} }),
   setTimerState:  (nodeId, state) => set(s => ({ timerStates: { ...s.timerStates, [nodeId]: state } })),
   clearTimerStates:   ()       => set({ timerStates: {} }),
+
+  // ── Revision history actions ───────────────────────────────────────────────
+  pushRevision: (scriptId, content) => {
+    const s = get();
+    const hist  = s.scriptRevisions[scriptId] ?? [];
+    const idx   = s.scriptRevisionIdx[scriptId] ?? hist.length - 1;
+    // Truncate any forward history
+    const base  = hist.slice(0, Math.max(0, idx + 1));
+    // Skip if content unchanged
+    if (base[base.length - 1] === content) return;
+    const next  = [...base, content].slice(-50);
+    set({
+      scriptRevisions:   { ...s.scriptRevisions,   [scriptId]: next },
+      scriptRevisionIdx: { ...s.scriptRevisionIdx, [scriptId]: next.length - 1 },
+    });
+  },
+
+  undoRevision: (scriptId) => {
+    const s    = get();
+    const hist = s.scriptRevisions[scriptId] ?? [];
+    const idx  = s.scriptRevisionIdx[scriptId] ?? hist.length - 1;
+    if (idx <= 0 || hist.length === 0) return null;
+    const newIdx = idx - 1;
+    set({ scriptRevisionIdx: { ...s.scriptRevisionIdx, [scriptId]: newIdx } });
+    return hist[newIdx] ?? null;
+  },
+
+  redoRevision: (scriptId) => {
+    const s    = get();
+    const hist = s.scriptRevisions[scriptId] ?? [];
+    const idx  = s.scriptRevisionIdx[scriptId] ?? hist.length - 1;
+    if (idx >= hist.length - 1) return null;
+    const newIdx = idx + 1;
+    set({ scriptRevisionIdx: { ...s.scriptRevisionIdx, [scriptId]: newIdx } });
+    return hist[newIdx] ?? null;
+  },
+
+  canUndo: (scriptId) => {
+    const s   = get();
+    const idx = s.scriptRevisionIdx[scriptId] ?? 0;
+    return idx > 0;
+  },
+
+  canRedo: (scriptId) => {
+    const s    = get();
+    const hist = s.scriptRevisions[scriptId] ?? [];
+    const idx  = s.scriptRevisionIdx[scriptId] ?? hist.length - 1;
+    return idx < hist.length - 1;
+  },
 }));
