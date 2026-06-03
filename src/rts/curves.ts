@@ -27,19 +27,24 @@ export type CurveType =
  * Map a SEL relay curve code (U1–U5, C1–C5, DEF/DT) to a named CurveType.
  *
  * Only the curves that have a direct CurveType equivalent are mapped precisely;
- * U4, U5, C4, C5 are not in the user-facing named set and fall back to 'MI'.
+ * U5, C4, C5 are not in the user-facing named set and fall back to 'MI'.
+ *
+ * U4 = IEEE Short-Time Inverse — SEL implements it with the same K=28.2, α=2.0
+ * constants as U3 (Extremely Inverse), so it maps to 'EI'.  See SEL-351S
+ * Instruction Manual §4 "Overcurrent Elements" curve table.
  */
 export function selCodeToCurveType(code: string): CurveType {
   switch (code.toUpperCase().trim()) {
     case 'U1': return 'MI';
     case 'U2': return 'VI';
     case 'U3': return 'EI';
+    case 'U4': return 'EI';  // IEEE Short-Time Inverse (same formula as EI on SEL-351S)
     case 'C1': return 'SI';
     case 'C2': return 'IEC_VI';
     case 'C3': return 'IEC_EI';
     case 'DEF':
     case 'DT':  return 'DT';
-    default:    return 'MI';   // U4, U5, C4, C5, unknown → moderately inverse
+    default:    return 'MI';   // U5, C4, C5, unknown → moderately inverse
   }
 }
 

@@ -25,12 +25,24 @@ export function parseSectionHeader(line: string): string | null {
   return null;
 }
 
-/** Parse a key=value pair from a stripped line */
+/**
+ * Parse a setting line in either of the two SEL formats:
+ *   Format 1 (settings sections):  KEY,"VALUE"   e.g.  TR,"51P1T+51G1T"
+ *   Format 2 (INFO section):       KEY=VALUE     e.g.  RELAYTYPE=SEL-351S-6
+ */
 export function parseKeyValue(line: string): { key: string; value: string } | null {
-  const eqIdx = line.indexOf('=');
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith('*') || trimmed.startsWith(';')) return null;
+
+  // Format 1: KEY,"VALUE"  (settings sections use comma + quoted value)
+  const csvMatch = trimmed.match(/^([A-Z0-9_]+),\s*"([^"]*)"$/i);
+  if (csvMatch) return { key: csvMatch[1].toUpperCase(), value: csvMatch[2] };
+
+  // Format 2: KEY=VALUE  (INFO section and some legacy formats)
+  const eqIdx = trimmed.indexOf('=');
   if (eqIdx < 1) return null;
-  const key = line.slice(0, eqIdx).trim().toUpperCase();
-  const value = line.slice(eqIdx + 1).trim();
+  const key = trimmed.slice(0, eqIdx).trim().toUpperCase();
+  const value = trimmed.slice(eqIdx + 1).trim();
   if (!key) return null;
   return { key, value };
 }

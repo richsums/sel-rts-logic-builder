@@ -55,10 +55,15 @@ export function parseSEL351(text: string, filename: string): ParsedRelaySettings
     ?? findSetting(settingGroups, 'FID')?.value
     ?? 'Unknown';
 
-  // Extract logic equations from SELOGIC section(s)
+  // Extract logic equations from SELOGIC, SET, L1-L6 (logic), and 1-6 (protection group) sections
   const logicEquations: LogicEquation[] = [];
   for (const group of settingGroups) {
-    if (!group.name.includes('SELOGIC') && !group.name.includes('SET')) continue;
+    const isLogicSection =
+      group.name.includes('SELOGIC') ||
+      group.name.includes('SET') ||
+      /^L[1-6]$/.test(group.name) ||   // [L1]–[L6] logic settings
+      /^[1-6]$/.test(group.name);       // [1]–[6] protection group settings
+    if (!isLogicSection) continue;
     for (const entry of group.entries) {
       // Logic equations have known labels or look like signal assignments
       const isLogic =

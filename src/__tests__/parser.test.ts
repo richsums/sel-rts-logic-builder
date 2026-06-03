@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseExpression, safeParseExpression } from '../selogic/parser';
 import { astToString, hasEdgeOperator, collectSignals } from '../selogic/ast';
+import { parseKeyValue } from '../relay-adapters/common/parser-utils';
 
 describe('SELogic AST parser', () => {
   it('parses literal 0', () => {
@@ -137,5 +138,82 @@ describe('SELogic AST parser', () => {
     const ast = parseExpression('A B');
     expect(ast?.type).toBe('BinaryOp');
     if (ast?.type === 'BinaryOp') expect(ast.op).toBe('AND');
+  });
+});
+
+// ─── SEL settings file line parser ───────────────────────────────────────────
+
+describe('parseKeyValue — SEL settings formats', () => {
+  it('parses KEY,"VALUE" format (settings sections)', () => {
+    const result = parseKeyValue('TR,"51P1T+51G1T+67P1T+67G1T+67G2T"');
+    expect(result).not.toBeNull();
+    expect(result?.key).toBe('TR');
+    expect(result?.value).toBe('51P1T+51G1T+67P1T+67G1T+67G2T');
+  });
+
+  it('parses KEY,"NUMERIC_VALUE" format', () => {
+    const result = parseKeyValue('50P1P,"15.60"');
+    expect(result).not.toBeNull();
+    expect(result?.key).toBe('50P1P');
+    expect(result?.value).toBe('15.60');
+  });
+
+  it('parses KEY,"VALUE WITH SPACES" format', () => {
+    const result = parseKeyValue('RID,"ELR F351A 02-26-26"');
+    expect(result).not.toBeNull();
+    expect(result?.key).toBe('RID');
+    expect(result?.value).toBe('ELR F351A 02-26-26');
+  });
+
+  it('parses KEY=VALUE format (INFO section)', () => {
+    const result = parseKeyValue('RELAYTYPE=SEL-351S-6');
+    expect(result).not.toBeNull();
+    expect(result?.key).toBe('RELAYTYPE');
+    expect(result?.value).toBe('SEL-351S-6');
+  });
+
+  it('parses FID=... format (INFO section)', () => {
+    const result = parseKeyValue('FID=SEL-351S-6-R518-V4-Z107106-D20250428');
+    expect(result).not.toBeNull();
+    expect(result?.key).toBe('FID');
+    expect(result?.value).toBe('SEL-351S-6-R518-V4-Z107106-D20250428');
+  });
+
+  it('returns null for comment lines starting with *', () => {
+    expect(parseKeyValue('* This is a comment')).toBeNull();
+  });
+
+  it('returns null for comment lines starting with ;', () => {
+    expect(parseKeyValue('; Another comment')).toBeNull();
+  });
+
+  it('returns null for blank lines', () => {
+    expect(parseKeyValue('')).toBeNull();
+    expect(parseKeyValue('   ')).toBeNull();
+  });
+
+  it('returns null for section header lines', () => {
+    expect(parseKeyValue('[L1]')).toBeNull();
+    expect(parseKeyValue('[G]')).toBeNull();
+    expect(parseKeyValue('[1]')).toBeNull();
+  });
+
+  it('key is always uppercased', () => {
+    const r1 = parseKeyValue('nfreq,"60"');
+    expect(r1?.key).toBe('NFREQ');
+    const r2 = parseKeyValue('nfreq=60');
+    expect(r2?.key).toBe('NFREQ');
+  });
+
+  it('handles 52A assignment with binary input', () => {
+    const result = parseKeyValue('52A,"IN101"');
+    expect(result?.key).toBe('52A');
+    expect(result?.value).toBe('IN101');
+  });
+
+  it('handles output contact assignment', () => {
+    const result = parseKeyValue('OUT101,"TRIP"');
+    expect(result?.key).toBe('OUT101');
+    expect(result?.value).toBe('TRIP');
   });
 });
