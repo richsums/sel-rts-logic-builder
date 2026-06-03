@@ -31,7 +31,9 @@ export function parseSectionHeader(line: string): string | null {
  *   Format 2 (INFO section):       KEY=VALUE     e.g.  RELAYTYPE=SEL-351S-6
  */
 export function parseKeyValue(line: string): { key: string; value: string } | null {
-  const trimmed = line.trim();
+  // Strip ASCII control characters (SEL files use  File Separator as line terminator)
+  // then normal whitespace trim.
+  const trimmed = line.replace(/[\x00-\x1F\x7F]+$/, '').trim();
   if (!trimmed || trimmed.startsWith('*') || trimmed.startsWith(';')) return null;
 
   // Format 1: KEY,"VALUE"  (settings sections use comma + quoted value)
