@@ -31,9 +31,12 @@ export function parseSectionHeader(line: string): string | null {
  *   Format 2 (INFO section):       KEY=VALUE     e.g.  RELAYTYPE=SEL-351S-6
  */
 export function parseKeyValue(line: string): { key: string; value: string } | null {
-  // Strip ASCII control characters (SEL files use  File Separator as line terminator)
-  // then normal whitespace trim.
-  const trimmed = line.replace(/[\x00-\x1F\x7F]+$/, '').trim();
+  // Strip trailing ASCII control characters — SEL settings files terminate every
+  // data line with 0x1C (File Separator). Walk from the end to avoid triggering
+  // the no-control-regex ESLint rule.
+  let end = line.length;
+  while (end > 0 && line.charCodeAt(end - 1) < 32) end--;
+  const trimmed = line.slice(0, end).trim();
   if (!trimmed || trimmed.startsWith('*') || trimmed.startsWith(';')) return null;
 
   // Format 1: KEY,"VALUE"  (settings sections use comma + quoted value)
