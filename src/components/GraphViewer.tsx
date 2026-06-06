@@ -293,7 +293,7 @@ function GraphViewerInner() {
           deleteKeyCode={null}
           nodesConnectable={false}
         >
-          <Background color="#e2e8f0" gap={24} size={1} />
+          <Background color="var(--c-border)" gap={24} size={1} style={{ opacity: 0.15 }} />
           <Controls showInteractive={false} />
           <MiniMap
             nodeColor={n => {

@@ -153,41 +153,96 @@
   --c-gate-edge:     #00ffff;
 }
 
-/* ?? SMUD: Clean Energy Grid ??????????????????????????????????????????????? */
+/* ?? SMUD: Sacramento Municipal Utility District ??????????????????????????? */
 [data-theme="smud"] {
-  --c-bg-app:        #1A0E08;
-  --c-bg-surface:    #2A1810;
-  --c-bg-surface-2:  #150B05;
-  --c-bg-header:     #0F0804;
-  --c-bg-nav:        #2A1810;
-  --c-bg-sidebar:    #150B05;
-  --c-border:        #F05A28;
+  /* === SMUD - Sacramento Municipal Utility District === */
+  /* Official brand: #F15D22 orange, black, white         */
+
+  /* New graph-specific variables */
+  --bg: #0F0F0F;
+  --surface: #1A1A1A;
+  --surface-alt: #0A0A0A;
+  --border: #F15D22;
+  --text: #FFFFFF;
+  --text-muted: #F4946E;
+  --text-accent: #F15D22;
+
+  /* Logic state colors */
+  --asserted: #F15D22;
+  --deasserted: #2A2A2A;
+  --trip: #FF2200;
+  --timing: #F4946E;
+  --blocked: #8B1A00;
+
+  /* Edge colors */
+  --edge-asserted: #F15D22;
+  --edge-deasserted: #333333;
+  --edge-not: #F4946E;
+  --edge-timing: #F4946E;
+  --edge-surge: #FFFFFF;
+
+  /* Gate node colors */
+  --gate-and: #F15D22;
+  --gate-or: #F4946E;
+  --gate-not: #FF4400;
+  --gate-edge: #FFFFFF;
+
+  /* Node border colors by type */
+  --node-protection: #F15D22;
+  --node-timer: #F4946E;
+  --node-trip-bit: #FF6633;
+  --node-input: #CC4A1A;
+  --node-output: #FF2200;
+  --node-tr: #FF2200;
+
+  /* Glow effect */
+  --glow: 0 0 18px 5px rgba(241,93,34,0.55);
+
+  /* Typography - clean modern sans matching SMUD corporate identity */
+  --font-primary: 'Source Sans 3', 'Source Sans Pro', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+  --font-display: 'Source Sans 3', 'Helvetica Neue', Arial, sans-serif;
+
+  /* Background - pure black with very subtle orange vignette at edges */
+  --bg-texture:
+    radial-gradient(ellipse at 20% 20%, rgba(241,93,34,0.07) 0%, transparent 45%),
+    radial-gradient(ellipse at 80% 80%, rgba(241,93,34,0.05) 0%, transparent 45%),
+    #0F0F0F;
+
+  /* Legacy --c-* variables (used by UI components throughout the app) */
+  --c-bg-app:        #0F0F0F;
+  --c-bg-surface:    #1A1A1A;
+  --c-bg-surface-2:  #0A0A0A;
+  --c-bg-header:     #0A0A0A;
+  --c-bg-nav:        #1A1A1A;
+  --c-bg-sidebar:    #0A0A0A;
+  --c-border:        #F15D22;
   --c-text-primary:  #FFFFFF;
-  --c-text-secondary:#FFB347;
-  --c-text-muted:    #7A4030;
-  --c-accent:        #F05A28;
+  --c-text-secondary:#F4946E;
+  --c-text-muted:    #3A3A3A;
+  --c-accent:        #F15D22;
   --c-accent-hover:  #D04A18;
   --c-accent-text:   #FFFFFF;
   --c-accent-soft:   #2A1000;
-  --c-accent-soft-t: #F05A28;
+  --c-accent-soft-t: #F15D22;
   --c-header-text:   #FFFFFF;
-  --c-header-sub:    #FFB347;
-  --c-stat-hl:       #F05A28;
-  --c-tab-active-b:  #F05A28;
-  --c-tab-active-bg: rgba(240,90,40,0.12);
-  --c-tab-active-t:  #F05A28;
-  --c-success:       #F05A28;
+  --c-header-sub:    #F4946E;
+  --c-stat-hl:       #F15D22;
+  --c-tab-active-b:  #F15D22;
+  --c-tab-active-bg: rgba(241,93,34,0.12);
+  --c-tab-active-t:  #F15D22;
+  --c-success:       #F15D22;
   --c-success-soft:  #2A1000;
-  --c-warning:       #FFB347;
+  --c-warning:       #F4946E;
   --c-warning-soft:  #1A0E00;
   --c-danger:        #FF2200;
   --c-danger-soft:   #1A0000;
   --c-danger-border: #FF2200;
-  --c-code-bg:       #1A0E08;
-  --c-scrollbar:     #3A2010;
-  --c-gate-and:      #F05A28;
-  --c-gate-or:       #FFB347;
-  --c-gate-not:      #FF2200;
+  --c-code-bg:       #0F0F0F;
+  --c-scrollbar:     #2A2A2A;
+  --c-gate-and:      #F15D22;
+  --c-gate-or:       #F4946E;
+  --c-gate-not:      #FF4400;
   --c-gate-edge:     #FFFFFF;
 }
 
@@ -423,8 +478,10 @@
 
 /* ?? SMUD background ???????????????????????????????????????????????????????? */
 [data-theme="smud"] .react-flow__background {
-  background-color: #0A1A0F !important;
-  background-image: radial-gradient(ellipse at 50% 30%, #0F2A18 0%, #0A1A0F 65%) !important;
+  background-color: #0F0F0F !important;
+  background-image:
+    radial-gradient(ellipse at 20% 20%, rgba(241,93,34,0.07) 0%, transparent 45%),
+    radial-gradient(ellipse at 80% 80%, rgba(241,93,34,0.05) 0%, transparent 45%) !important;
 }
 
 /* ReactFlow */
