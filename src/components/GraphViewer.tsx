@@ -26,16 +26,17 @@ import ReactFlow, {
   type Viewport,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { GitBranch, RotateCcw, Zap } from 'lucide-react';
+import { GitBranch, RotateCcw, Zap, Lightbulb, Eye, EyeOff, LayoutGrid } from 'lucide-react';
 import { useProjectStore } from '../store/project';
 import { useUIStore, type AnimationSpeed } from '../store/ui';
 import { NODE_TYPES, type GraphNodeData } from '../graph/nodes';
 import { EDGE_TYPES, type AnimatedLogicEdgeData } from '../graph/edges';
 import {
-  buildReactFlowLayout,
   applySignalStatesToLayout,
   applyEdgeStatesToLayout,
 } from '../graph/buildReactFlow';
+import { buildAreaLayout } from '../graph/areaLayout';
+import { partitionGraph } from '../graph/partition';
 import {
   propagate,
   initialSignalStates,
@@ -55,11 +56,13 @@ function GraphViewerInner() {
     graphViewport: storedViewport, graphProjectId,
     signalStates, animationSpeed, lastChangeCount,
     pulsingEdgeIds, flashingNodes,
+    showLedPb, hiddenAreaIds,
     saveGraphLayout, setGraphLayout,
     setSignalStates, resetSignalStates,
     setAnimationSpeed, setLastChangeCount,
     setPulsingEdgeIds, setFlashingNodes, clearAnimations,
     clearTimerStates,
+    toggleLedPb, hideArea, showArea, showAllAreas,
   } = useUIStore();
 
   const { setViewport } = useReactFlow();
@@ -68,6 +71,13 @@ function GraphViewerInner() {
   const animTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const [resetConfirm, setResetConfirm] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [areasMenuOpen, setAreasMenuOpen] = useState(false);
+  const hiddenSet = React.useMemo(() => new Set(hiddenAreaIds), [hiddenAreaIds]);
+  // Full area list (incl. hidden) for the Areas dropdown.
+  const allAreas = React.useMemo(
+    () => (graph ? partitionGraph(graph, relay, { includeLedPb: showLedPb }).areas : []),
+    [graph, relay, showLedPb],
+  );
 
   // ── Toggle handler ──────────────────────────────────────────────────────────
   const handleToggle = useCallback((nodeId: string, newValue: 0 | 1) => {
@@ -129,8 +139,11 @@ function GraphViewerInner() {
       return;
     }
 
-    // Build fresh layout
-    const { nodes: n, edges: e } = buildReactFlowLayout(graph, relay, states, handleToggle);
+    // Build fresh area-partitioned layout
+    const { nodes: n, edges: e } = buildAreaLayout(graph, relay, states, handleToggle, {
+      includeLedPb: showLedPb,
+      hiddenAreaIds: new Set(hiddenAreaIds),
+    });
     setNodes(n);
     setEdges(e);
     setGraphLayout(n, e, activeProjectId ?? '');
@@ -141,6 +154,34 @@ function GraphViewerInner() {
     }, 50);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graph, activeProjectId]);
+
+  // ── Rebuild when LED/PB toggle or hidden areas change ──────────────────────
+  // Preserve the user's dragged area (group) positions across rebuilds so
+  // arranging windows during testing survives a hide/show or LED/PB toggle.
+  const didMountAreas = useRef(false);
+  useEffect(() => {
+    if (!graph) return;
+    if (!didMountAreas.current) { didMountAreas.current = true; return; }
+
+    const priorPos = new Map<string, { x: number; y: number }>();
+    for (const nd of nodes) {
+      if (nd.type === 'logicAreaNode') priorPos.set(nd.id, nd.position);
+    }
+
+    const { nodes: n, edges: e } = buildAreaLayout(graph, relay, signalStates, handleToggle, {
+      includeLedPb: showLedPb,
+      hiddenAreaIds: new Set(hiddenAreaIds),
+    });
+    const merged = n.map(nd =>
+      nd.type === 'logicAreaNode' && priorPos.has(nd.id)
+        ? { ...nd, position: priorPos.get(nd.id)! }
+        : nd,
+    );
+    setNodes(merged);
+    setEdges(e);
+    setGraphLayout(merged, e, activeProjectId ?? '');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showLedPb, hiddenAreaIds]);
 
   // ── Sync signal states → node/edge data ───────────────────────────────────
   useEffect(() => {
@@ -188,13 +229,17 @@ function GraphViewerInner() {
     clearTimerStates();
     resetSignalStates();
     clearAnimations();
-    const { nodes: n, edges: e } = buildReactFlowLayout(graph, relay, states, handleToggle);
+    const { nodes: n, edges: e } = buildAreaLayout(graph, relay, states, handleToggle, {
+      includeLedPb: showLedPb,
+      hiddenAreaIds: new Set(hiddenAreaIds),
+    });
     setNodes(n);
     setEdges(e);
     setGraphLayout(n, e, activeProjectId ?? '');
     setTimeout(() => setViewport({ x: 0, y: 0, zoom: 0.8 }, { duration: 400 }), 50);
   }, [resetConfirm, graph, relay, clearTimerStates, resetSignalStates, clearAnimations,
-      handleToggle, setNodes, setEdges, setGraphLayout, activeProjectId, setViewport]);
+      handleToggle, setNodes, setEdges, setGraphLayout, activeProjectId, setViewport,
+      showLedPb, hiddenAreaIds]);
 
   useEffect(() => () => {
     animTimers.current.forEach(clearTimeout);
@@ -255,6 +300,60 @@ function GraphViewerInner() {
               </button>
             ))}
           </div>
+          {/* LEDs / PBs toggle */}
+          <button
+            onClick={toggleLedPb}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+              showLedPb ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+            title="Show / hide LED and front-panel pushbutton areas"
+          >
+            <Lightbulb className="w-3.5 h-3.5" />
+            LEDs / PBs
+          </button>
+
+          {/* Areas show/hide dropdown */}
+          <div className="relative">
+            <button
+              onClick={() => setAreasMenuOpen(o => !o)}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                hiddenAreaIds.length > 0 ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+              title="Show, hide, or restore logic-area windows"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              Areas{hiddenAreaIds.length > 0 ? ` (${hiddenAreaIds.length} hidden)` : ''}
+            </button>
+            {areasMenuOpen && (
+              <div className="absolute right-0 mt-1 w-64 max-h-80 overflow-auto bg-white border border-slate-200 rounded-lg shadow-lg z-50 p-1.5">
+                <div className="flex items-center justify-between px-1.5 py-1">
+                  <span className="text-xs font-semibold text-slate-500">{allAreas.length} areas</span>
+                  {hiddenAreaIds.length > 0 && (
+                    <button onClick={showAllAreas} className="text-xs text-blue-600 hover:underline">Show all</button>
+                  )}
+                </div>
+                {allAreas.map(a => {
+                  const hidden = hiddenSet.has(a.id);
+                  return (
+                    <button
+                      key={a.id}
+                      onClick={() => (hidden ? showArea(a.id) : hideArea(a.id))}
+                      className="w-full flex items-center justify-between gap-2 px-1.5 py-1 rounded hover:bg-slate-50 text-xs"
+                    >
+                      <span className={`truncate font-mono text-left ${hidden ? 'text-slate-400 line-through' : 'text-slate-700'}`}>
+                        {a.label}
+                      </span>
+                      {hidden
+                        ? <EyeOff className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                        : <Eye className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />}
+                    </button>
+                  );
+                })}
+                {allAreas.length === 0 && <div className="px-1.5 py-2 text-xs text-slate-400">No areas.</div>}
+              </div>
+            )}
+          </div>
+
           {/* Reset */}
           <button
             onClick={handleReset}

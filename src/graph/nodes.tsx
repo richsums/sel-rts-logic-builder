@@ -13,8 +13,9 @@
 
 import React, { useCallback } from 'react';
 import { useThemeStore } from '../store/theme';
+import { useUIStore } from '../store/ui';
 import { Handle, Position, type NodeProps } from 'reactflow';
-import { Lock } from 'lucide-react';
+import { Lock, X } from 'lucide-react';
 import type { NodeDisplayInfo, DisplaySetting } from './displaySettings';
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
@@ -152,7 +153,7 @@ export function ProtectionElementNode({ id, data }: NodeProps<GraphNodeData>) {
       <div className="flex items-start justify-between gap-1 mb-1">
         <div className="min-w-0">
           <div className="text-xs font-bold font-mono truncate">
-            {displayInfo.icon} {id}
+            {displayInfo.icon} {data.nodeId ?? id}
           </div>
           <div className="text-xs text-slate-400 truncate leading-tight">{displayInfo.subtitle}</div>
           {isTWB && (
@@ -160,7 +161,7 @@ export function ProtectionElementNode({ id, data }: NodeProps<GraphNodeData>) {
           )}
         </div>
         {displayInfo.toggleable
-          ? <TogglePill nodeId={id} state={signalState} onToggle={onToggle} />
+          ? <TogglePill nodeId={data.nodeId ?? id} state={signalState} onToggle={onToggle} />
           : <ComputedBadge state={signalState} />
         }
       </div>
@@ -222,7 +223,7 @@ export function TimerNode({ id, data }: NodeProps<GraphNodeData>) {
           </text>
         </svg>
         <div className="min-w-0 flex-1">
-          <div className="text-xs font-bold font-mono truncate">⏱ {id}</div>
+          <div className="text-xs font-bold font-mono truncate">⏱ {data.nodeId ?? id}</div>
           <div className="text-xs text-slate-400 truncate">{displayInfo.subtitle}</div>
         </div>
       </div>
@@ -249,7 +250,7 @@ export function LatchNode({ id, data }: NodeProps<GraphNodeData>) {
       {inputHandle}
       <div className="flex items-start justify-between gap-1">
         <div className="min-w-0">
-          <div className="text-xs font-bold font-mono truncate">🔒 {id}</div>
+          <div className="text-xs font-bold font-mono truncate">🔒 {data.nodeId ?? id}</div>
           <div className="text-xs text-slate-400 truncate">{displayInfo.subtitle}</div>
         </div>
         {/* Latch state badge */}
@@ -281,7 +282,7 @@ export function LogicGateNode({ id, data }: NodeProps<GraphNodeData>) {
       {inputHandle}
       <div className="flex items-center justify-between gap-1">
         <div className="min-w-0">
-          <div className="text-xs font-bold font-mono truncate">⊕ {id}</div>
+          <div className="text-xs font-bold font-mono truncate">⊕ {data.nodeId ?? id}</div>
           <div className="text-xs text-slate-400 truncate leading-tight">{displayInfo.subtitle}</div>
         </div>
         <ComputedBadge state={signalState} />
@@ -309,10 +310,10 @@ export function InputSignalNode({ id, data }: NodeProps<GraphNodeData>) {
     >
       <div className="flex items-center justify-between gap-1">
         <div className="min-w-0">
-          <div className="text-xs font-bold font-mono truncate">↑ {id}</div>
+          <div className="text-xs font-bold font-mono truncate">↑ {data.nodeId ?? id}</div>
           <div className="text-xs text-blue-500 truncate leading-tight">{displayInfo.subtitle || 'Input'}</div>
         </div>
-        <TogglePill nodeId={id} state={signalState} onToggle={onToggle} />
+        <TogglePill nodeId={data.nodeId ?? id} state={signalState} onToggle={onToggle} />
       </div>
       {outputHandle}
     </div>
@@ -347,7 +348,7 @@ export function TripOutputNode({ id, data }: NodeProps<GraphNodeData>) {
       {inputHandle}
       <div className="relative z-10">
         <div className="text-sm font-bold font-mono">
-          {isTripped ? '⚡ TRIP' : '⚡ ' + id}
+          {isTripped ? '⚡ TRIP' : '⚡ ' + (data.nodeId ?? id)}
         </div>
         <div className="text-xs opacity-80">{displayInfo.subtitle}</div>
         {displayInfo.settings.length > 0 && (
@@ -566,7 +567,7 @@ export function OutputContactNode({ id, data }: NodeProps<OutputContactNodeData>
       {/* Contact symbol row */}
       <div className="flex items-center justify-between gap-1 mb-1">
         <div className="min-w-0">
-          <div className="text-sm font-bold font-mono">{id}</div>
+          <div className="text-sm font-bold font-mono">{data.nodeId ?? id}</div>
           <div className="text-xs opacity-60 truncate">= {expression}</div>
         </div>
         {/* Relay contact symbol */}
@@ -596,6 +597,60 @@ export function OutputContactNode({ id, data }: NodeProps<OutputContactNodeData>
   );
 }
 
+// ─── LogicAreaNode (group / window frame) ─────────────────────────────────────
+//
+// A draggable bordered "window" that visually groups one logic area's nodes.
+// Children are parented to it (React Flow `parentNode`) so dragging the frame
+// moves the whole area. The header carries the area label + a hide button.
+
+export interface LogicAreaNodeData {
+  label: string;
+  kind: 'output' | 'sv' | 'led' | 'pb';
+  areaId: string;
+  width: number;
+  height: number;
+}
+
+const AREA_ACCENT: Record<LogicAreaNodeData['kind'], string> = {
+  output: '#3b82f6',
+  sv:     '#9333ea',
+  led:    '#f59e0b',
+  pb:     '#0d9488',
+};
+
+export function LogicAreaNode({ data }: NodeProps<LogicAreaNodeData>) {
+  const hideArea = useUIStore(s => s.hideArea);
+  const accent = AREA_ACCENT[data.kind] ?? AREA_ACCENT.output;
+
+  return (
+    <div
+      style={{
+        width: data.width,
+        height: data.height,
+        border: `2px solid ${accent}`,
+        borderRadius: 10,
+        background: `color-mix(in srgb, ${accent} 6%, var(--surface, #ffffff))`,
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        className="flex items-center justify-between gap-2 px-2"
+        style={{ height: 26, background: accent, color: '#fff' }}
+      >
+        <span className="truncate font-mono text-xs font-bold">{data.label}</span>
+        <button
+          className="nodrag flex-shrink-0 rounded p-0.5 hover:bg-black/20"
+          title="Hide this area"
+          onClick={(e) => { e.stopPropagation(); hideArea(data.areaId); }}
+        >
+          <X className="w-3 h-3" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Node type registry ───────────────────────────────────────────────────────
 
 export const NODE_TYPES = {
@@ -606,6 +661,7 @@ export const NODE_TYPES = {
   inputSignalNode:   InputSignalNode,
   tripOutputNode:    TripOutputNode,
   outputContactNode: OutputContactNode,
+  logicAreaNode:     LogicAreaNode,
   // Logic gate symbol nodes (AST-decomposed)
   andGate:           LogicGateSymbolNode,
   orGate:            LogicGateSymbolNode,

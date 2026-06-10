@@ -37,6 +37,12 @@ export interface UIState {
   /** Project ID that owns the current stored graph layout. */
   graphProjectId: string | null;
 
+  // ── Logic-area windows ────────────────────────────────────────────────────
+  /** Whether LED / front-panel PB areas are shown on the graph. */
+  showLedPb: boolean;
+  /** Area ids the user has hidden from the graph. */
+  hiddenAreaIds: string[];
+
   // ── Logic simulation ──────────────────────────────────────────────────────
   /** Current logical state of every signal in the active graph. */
   signalStates: SignalStates;
@@ -71,6 +77,15 @@ export interface UIState {
   setGraphLayout: (nodes: Node[], edges: Edge[], projectId: string) => void;
   /** Clear stored layout for the given project (forces recompute on next mount). */
   clearGraphLayout: (projectId: string) => void;
+
+  /** Toggle LED / PB areas on the graph. */
+  toggleLedPb: () => void;
+  /** Hide a logic area (window) from the graph. */
+  hideArea: (areaId: string) => void;
+  /** Restore a single hidden area. */
+  showArea: (areaId: string) => void;
+  /** Restore all hidden areas. */
+  showAllAreas: () => void;
 
   /** Replace signal states (called after propagation). */
   setSignalStates: (states: SignalStates) => void;
@@ -122,6 +137,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   graphEdges:     [],
   graphViewport:  DEFAULT_VIEWPORT,
   graphProjectId: null,
+  showLedPb:      false,
+  hiddenAreaIds:  [],
 
   // Simulation state
   signalStates:    {},
@@ -156,6 +173,17 @@ export const useUIStore = create<UIState>((set, get) => ({
         ? { graphNodes: [], graphEdges: [], graphProjectId: null }
         : {}
     ),
+
+  toggleLedPb: () => set(state => ({ showLedPb: !state.showLedPb })),
+  hideArea: (areaId) =>
+    set(state =>
+      state.hiddenAreaIds.includes(areaId)
+        ? {}
+        : { hiddenAreaIds: [...state.hiddenAreaIds, areaId] }
+    ),
+  showArea: (areaId) =>
+    set(state => ({ hiddenAreaIds: state.hiddenAreaIds.filter(id => id !== areaId) })),
+  showAllAreas: () => set({ hiddenAreaIds: [] }),
 
   // ── Simulation actions ────────────────────────────────────────────────────
   setSignalStates:    (states) => set({ signalStates: states }),

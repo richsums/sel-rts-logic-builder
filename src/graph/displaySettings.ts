@@ -256,16 +256,31 @@ export function extractDisplaySettings(
     };
   }
 
-  // ── Latch / Sealing element ────────────────────────────────────────────────
+  // ── Latch / Sealing element / SV ───────────────────────────────────────────
   if (kind === 'latch') {
     const expr = node?.equation?.expression ?? '—';
     const ft   = node?.equation?.functionType;
     const isSet = ft === 'LATCH_SET' || nodeId.toUpperCase().endsWith('S');
+    const settings: DisplaySetting[] = [
+      { label: isSet ? 'Set' : 'Reset', value: expr.length > 20 ? expr.slice(0, 20) + '…' : expr },
+    ];
+
+    // SV supervisory bits also carry PU/DO timing (SVnPU / SVnDO).
+    const svm = nodeId.toUpperCase().match(/^SV(\d+)/);
+    if (svm) {
+      const n = svm[1];
+      const get = (k: string) => map.get(k) ?? map.get(k.toUpperCase()) ?? map.get(k.toLowerCase());
+      const pu = get(`SV${n}PU`) ?? get(`SV0${n}PU`);
+      const dop = get(`SV${n}DO`) ?? get(`SV0${n}DO`);
+      if (pu !== undefined) settings.push({ label: 'PU Time', value: `${pu} s` });
+      if (dop !== undefined) settings.push({ label: 'DO Time', value: `${dop} s` });
+    }
+
     return {
       kind:      'latch',
       icon:      '🔒',
       subtitle:  `${tag} · ${isSet ? 'Latch Set' : 'Latch Reset'}`,
-      settings:  [{ label: isSet ? 'Set' : 'Reset', value: expr.length > 20 ? expr.slice(0, 20) + '…' : expr }],
+      settings,
       toggleable: false,
     };
   }

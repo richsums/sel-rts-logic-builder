@@ -196,11 +196,17 @@ export function buildReactFlowLayout(
   relay:        ParsedRelaySettings | null,
   signalStates: SignalStates,
   onToggle:     (nodeId: string, value: 0 | 1) => void,
+  nodeFilter?:  Set<string>,
 ): { nodes: Node[]; edges: Edge[] } {
+
+  // When a nodeFilter is supplied, only build the subgraph it names (used to
+  // render one logic area). `inArea` gates every node/contact we emit.
+  const inArea = (id: string): boolean => !nodeFilter || nodeFilter.has(id);
 
   // ── Assign column positions ────────────────────────────────────────────────
   const depthGroups = new Map<number, string[]>();
   for (const [id, node] of graph.nodes) {
+    if (!inArea(id)) continue;
     const d = node.depth;
     if (!depthGroups.has(d)) depthGroups.set(d, []);
     depthGroups.get(d)!.push(id);
@@ -241,11 +247,13 @@ export function buildReactFlowLayout(
 
   for (const [id] of graph.nodes) {
     if (!isPickupBit(id)) continue;
+    if (!inArea(id)) continue;                       // outside this area
     const tcId   = timerNodeId(id);
     if (!tcId) continue;                             // instantaneous — no TC
 
     const tripId = id.slice(0, -1) + 'T';
     if (!graph.nodes.has(tripId)) continue;          // trip word bit not in graph
+    if (!inArea(tripId)) continue;                   // trip bit not in this area
 
     const pickupPos = posOf.get(id)  ?? { x: 0, y: 0 };
     const tripPos   = posOf.get(tripId) ?? { x: NODE_H_GAP * 2, y: 0 };
@@ -305,6 +313,7 @@ export function buildReactFlowLayout(
 
   // ── Build signal nodes + wire edges ───────────────────────────────────────
   for (const [id, gn] of graph.nodes) {
+    if (!inArea(id)) continue;
     const pos         = posOf.get(id) ?? { x: 0, y: 0 };
     const displayInfo = extractDisplaySettings(id, graph, relay);
     const nodeType    = reactFlowNodeType(displayInfo, id);
@@ -413,6 +422,8 @@ export function buildReactFlowLayout(
   let outIdx = 0;
   const outCount = outputContacts.size;
   for (const [outId, expr] of outputContacts) {
+    // Restrict to contacts belonging to the current area (if filtering).
+    if (!inArea(outId)) { outIdx++; continue; }
     // Only create output contact nodes if not already in graph
     if (graph.nodes.has(outId)) { outIdx++; continue; }
 
@@ -513,12 +524,25 @@ export function buildReactFlowLayout(
   return { nodes: layoutedNodes, edges: allEdges };
 }
 
+// ─── Area-scoped id helper ────────────────────────────────────────────────────
+
+/**
+ * Strip an `areaId::` prefix to recover the logical signal id. Area-aware layouts
+ * (see `areaLayout.ts`) clone shared signals into multiple areas using ids like
+ * `area_OUT101::51P1T`; simulation/animation always index by the logical id.
+ */
+export function logicalIdOf(flowId: string): string {
+  const i = flowId.indexOf('::');
+  return i === -1 ? flowId : flowId.slice(i + 2);
+}
+
 // ─── State updaters ───────────────────────────────────────────────────────────
 
 /**
  * Patch node data with fresh signal states + animation states.
- * Gate nodes (IDs starting with 'g_') are left unchanged in v1
- * since their state is derived and would require re-running decomposeSubtree.
+ * Resolves the logical id from area-scoped flow ids so every duplicate instance
+ * of a shared signal updates together. Gate nodes ('g_') and area frame nodes
+ * are left unchanged.
  */
 export function applySignalStatesToLayout(
   nodes:        Node[],
@@ -526,14 +550,15 @@ export function applySignalStatesToLayout(
   flashingNodes: Record<string, string>,
 ): Node[] {
   return nodes.map(n => {
-    // Gate nodes: keep existing state
-    if (n.id.startsWith('g_')) return n;
+    if (n.type === 'logicAreaNode') return n;          // area frame — no signal
+    const lid = logicalIdOf(n.id);
+    if (lid.startsWith('g_')) return n;                // gate: keep existing state
     return {
       ...n,
       data: {
         ...n.data,
-        signalState: (signalStates[n.id] ?? 0) as 0 | 1,
-        animState:   flashingNodes[n.id] ?? 'idle',
+        signalState: (signalStates[lid] ?? 0) as 0 | 1,
+        animState:   flashingNodes[lid] ?? 'idle',
       },
     };
   });
@@ -551,19 +576,24 @@ export function applyEdgeStatesToLayout(
 ): Edge[] {
   const pulsingSet = new Set(pulsingEdgeIds);
   return edges.map(e => {
+    const ls = logicalIdOf(e.source);
+    const lt = logicalIdOf(e.target);
+    // Animator emits pulses keyed by the logical `src->tgt` edge; match either
+    // the literal flow-edge id or the logical key so all duplicates pulse.
+    const pulsing = pulsingSet.has(e.id) || pulsingSet.has(`${ls}->${lt}`);
     // Gate edges: just update pulsing
-    if (e.source.startsWith('g_') || e.target.startsWith('g_')) {
-      return { ...e, data: { ...e.data, pulsing: pulsingSet.has(e.id) } };
+    if (ls.startsWith('g_') || lt.startsWith('g_')) {
+      return { ...e, data: { ...e.data, pulsing } };
     }
-    const gn    = graph.nodes.get(e.target);
+    const gn    = graph.nodes.get(lt);
     const expr  = gn?.equation?.expression ?? '';
-    const isNot = expr.toUpperCase().includes(`!${e.source.toUpperCase()}`);
+    const isNot = expr.toUpperCase().includes(`!${ls.toUpperCase()}`);
     return {
       ...e,
       data: {
-        state:   (signalStates[e.source] ?? 0) as 0 | 1,
+        state:   (signalStates[ls] ?? 0) as 0 | 1,
         isNot,
-        pulsing: pulsingSet.has(e.id),
+        pulsing,
       },
     };
   });
