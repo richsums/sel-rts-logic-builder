@@ -33,16 +33,18 @@ import { computeLayout } from './layout';
 export function parseOutputContacts(relay: ParsedRelaySettings | null): Map<string, string> {
   const result = new Map<string, string>();
   if (!relay) return result;
+  // ALRMOUT is the SEL-351S alarm output contact — treat it like OUTxxx.
+  const CONTACT_RE = /^(OUT\d+|ALRMOUT)$/i;
   for (const group of relay.settingGroups) {
     for (const entry of group.entries) {
-      if (/^OUT\d+$/i.test(entry.key)) {
+      if (CONTACT_RE.test(entry.key)) {
         result.set(entry.key.toUpperCase(), entry.value);
       }
     }
   }
-  // Also check logicEquations for OUTPUT type
+  // Also check logicEquations for OUTPUT/ALARM contact labels
   for (const eq of relay.logicEquations) {
-    if (/^OUT\d+$/i.test(eq.label) && eq.functionType === 'OUTPUT') {
+    if (CONTACT_RE.test(eq.label) && (eq.functionType === 'OUTPUT' || eq.functionType === 'ALARM')) {
       result.set(eq.label.toUpperCase(), eq.expression);
     }
   }
@@ -58,8 +60,8 @@ export const GATE_H_OFFSET = 90;    // x-offset per gate level (right → left)
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 function reactFlowNodeType(info: NodeDisplayInfo, nodeId: string): string {
-  // Output contacts (OUTxxx) get special node type regardless of display kind
-  if (/^OUT\d+$/i.test(nodeId)) return 'outputContactNode';
+  // Output contacts (OUTxxx / ALRMOUT) get special node type regardless of display kind
+  if (/^(OUT\d+|ALRMOUT)$/i.test(nodeId)) return 'outputContactNode';
   switch (info.kind) {
     case 'protection': return 'protectionElement';
     case 'timer':      return 'timerNode';
@@ -103,6 +105,20 @@ interface DecompCtx {
  * Leaf (Operand) → returns the signal name directly.
  * Compound (BinaryOp / UnaryOp) → creates a gate node and returns its ID.
  */
+/**
+ * Flatten an associative chain of the same binary operator into its operand
+ * list, so `A+B+C+D+E` becomes ONE 5-input OR gate instead of a cascade of
+ * four 2-input gates. Cleaner diagram, easier to read against the equation.
+ */
+function flattenSameOp(ast: ASTNode, op: string, out: ASTNode[]): void {
+  if (ast.type === 'BinaryOp' && ast.op === op) {
+    flattenSameOp(ast.left, op, out);
+    flattenSameOp(ast.right, op, out);
+  } else {
+    out.push(ast);
+  }
+}
+
 function decomposeSubtree(
   ast:      ASTNode,
   parentId: string,
@@ -122,30 +138,37 @@ function decomposeSubtree(
     const inputId = decomposeSubtree(ast.operand, gateId, x - GATE_H_OFFSET, y, ctx);
 
     ctx.gateNodes.push(makeGateNode(gateId, gt, 1, x, y, ctx.signalStates[inputId] ?? 0));
-    pushGateEdge(inputId, 'a', gateId, ctx);
+    pushGateEdge(inputId, 'in0', gateId, ctx);
     return gateId;
   }
 
-  // ── BinaryOp (AND / OR / XOR) ─────────────────────────────────────────────
-  const bop   = ast as BinaryOpNode;
-  const gt    = binaryOpToGateType(bop.op);
-  const leftId  = decomposeSubtree(bop.left,  gateId, x - GATE_H_OFFSET, y - 28, ctx);
-  const rightId = decomposeSubtree(bop.right, gateId, x - GATE_H_OFFSET, y + 28, ctx);
+  // ── BinaryOp (AND / OR / XOR) — flattened to one n-input gate ─────────────
+  const bop = ast as BinaryOpNode;
+  const gt  = binaryOpToGateType(bop.op);
+  const operands: ASTNode[] = [];
+  flattenSameOp(bop, bop.op, operands);
 
-  const leftSt  = (ctx.signalStates[leftId]  ?? 0) as 0 | 1;
-  const rightSt = (ctx.signalStates[rightId] ?? 0) as 0 | 1;
+  const childIds = operands.map((operand, k) =>
+    decomposeSubtree(
+      operand, gateId,
+      x - GATE_H_OFFSET,
+      y + (k - (operands.length - 1) / 2) * 36,
+      ctx,
+    ),
+  );
+
+  const states = childIds.map(cid => (ctx.signalStates[cid] ?? 0) as 0 | 1);
   const outSt: 0 | 1 = gt === 'or'
-    ? (leftSt === 1 || rightSt === 1 ? 1 : 0)
-    : (leftSt === 1 && rightSt === 1 ? 1 : 0);
+    ? (states.some(s => s === 1) ? 1 : 0)
+    : (states.every(s => s === 1) ? 1 : 0);
 
-  ctx.gateNodes.push(makeGateNode(gateId, gt, 2, x, y, outSt));
-  pushGateEdge(leftId,  'a', gateId, ctx);
-  pushGateEdge(rightId, 'b', gateId, ctx);
+  ctx.gateNodes.push(makeGateNode(gateId, gt, operands.length, x, y, outSt));
+  childIds.forEach((cid, k) => pushGateEdge(cid, `in${k}`, gateId, ctx));
   return gateId;
 }
 
 function makeGateNode(
-  id: string, gt: GateType, inputCount: 1 | 2,
+  id: string, gt: GateType, inputCount: number,
   x: number, y: number, signalState: 0 | 1,
 ): Node<GateNodeData> {
   return {
@@ -159,18 +182,18 @@ function makeGateNode(
 }
 
 function pushGateEdge(
-  source: string, sourceHandle: string, target: string, ctx: DecompCtx,
+  source: string, targetHandle: string, target: string, ctx: DecompCtx,
 ): void {
   // Skip literal placeholders
   if (source.startsWith('__lit_')) return;
-  const eid = `${source}_${sourceHandle}->${target}`;
+  const eid = `${source}_${targetHandle}->${target}`;
   if (ctx.seenEdgeIds.has(eid)) return;
   ctx.seenEdgeIds.add(eid);
   ctx.gateEdges.push({
     id:           eid,
     source,
-    sourceHandle,
     target,
+    targetHandle,
     type:         'animatedLogic',
     markerEnd:    { type: MarkerType.ArrowClosed, width: 8, height: 8, color: '#94a3b8' },
     data:         { state: (ctx.signalStates[source] ?? 0) as 0 | 1, isNot: false, pulsing: false },
@@ -345,6 +368,8 @@ export function buildReactFlowLayout(
         displayInfo,
         signalState: (signalStates[id] ?? 0) as 0 | 1,
         animState:   'idle',
+        // Synthesized latch/seal nodes show labelled SET / RST(UL) input pins.
+        pins: gn.synthetic === 'latch' || gn.synthetic === 'seal' ? gn.synthetic : undefined,
         onToggle,
       } as GraphNodeData,
     });
@@ -353,7 +378,25 @@ export function buildReactFlowLayout(
     const expr = gn.equation?.expression ?? '';
     const ast  = expr ? parseExpression(expr) : null;
 
-    if (ast && (ast.type === 'BinaryOp' || ast.type === 'UnaryOp')) {
+    if (gn.synthetic === 'latch' || gn.synthetic === 'seal') {
+      // ── Synthesized latch / seal node: direct edges onto labelled pins ────
+      // (skip AST decomposition — the seal-in self-reference is sim-only).
+      const SET_DEP = /^(SET\d+|LT\d+S|SV\d+S|TR|CL)$/i;
+      for (const dep of gn.dependencies) {
+        const eid = `${dep}->${id}`;
+        if (seenSignalEdgeIds.has(eid)) continue;
+        seenSignalEdgeIds.add(eid);
+        signalEdges.push({
+          id:           eid,
+          source:       dep,
+          target:       id,
+          targetHandle: SET_DEP.test(dep) ? 'set' : 'rst',
+          type:         'animatedLogic',
+          markerEnd:    { type: MarkerType.ArrowClosed, width: 10, height: 10, color: '#94a3b8' },
+          data:         { state: (signalStates[dep] ?? 0) as 0 | 1, isNot: false, pulsing: false },
+        });
+      }
+    } else if (ast && (ast.type === 'BinaryOp' || ast.type === 'UnaryOp')) {
       // ── Complex equation: decompose AST into gate nodes ──────────────────
       // Gate root sits one step to the left of the target signal node
       const gateRootId = decomposeSubtree(

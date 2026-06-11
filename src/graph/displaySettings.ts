@@ -105,6 +105,89 @@ function classifyKind(nodeId: string, graph: DependencyGraph): NodeKind {
   return 'gate';
 }
 
+// ─── SEL-351 direct setting resolution ───────────────────────────────────────
+// SEL-351-family settings use the element id itself as the setting prefix:
+//   51P1T / 51P1   → pickup 51P1P, curve 51P1C, time dial 51P1TD
+//   67G2T / 67G2   → pickup 50G2P, delay 67G2D (cycles), torque ctrl 67G2TC
+//   50G2 / 50N1    → pickup 50G2P / 50N1P
+// Values of "OFF" are shown as OFF (element disabled).
+
+function rawSetting(map: SettingsMap, key: string): string | undefined {
+  return map.get(key.toUpperCase()) ?? map.get(key);
+}
+
+function fmtAmps(raw: string | undefined): string | null {
+  if (raw === undefined) return null;
+  if (/^OFF$/i.test(raw.trim())) return 'OFF';
+  const n = parseFloat(raw);
+  return isNaN(n) ? raw : `${n.toFixed(2)} A sec`;
+}
+
+function sel351DirectInfo(
+  nodeId: string,
+  tag: string,
+  map: SettingsMap,
+): Omit<NodeDisplayInfo, 'kind' | 'toggleable'> | null {
+  const id = nodeId.toUpperCase();
+
+  // 51-series time-overcurrent: 51P1T, 51P1, 51G1T, 51Q(T)…
+  let m = id.match(/^51(P|N|G|Q)(\d*)(T|R)?$/);
+  if (m) {
+    const base = `51${m[1]}${m[2]}`;
+    const pk = fmtAmps(rawSetting(map, `${base}P`));
+    if (pk === null) return null;                      // not this relay family
+    const curve = rawSetting(map, `${base}C`);
+    const td    = rawSetting(map, `${base}TD`);
+    const tc    = rawSetting(map, `${base}TC`);
+    const isTimed = m[3] === 'T';
+    return {
+      icon: '⚡',
+      subtitle: `${tag} · Time OC ${isTimed ? '(timed out)' : '(pickup)'}`,
+      settings: [
+        { label: 'Pickup', value: pk },
+        ...(curve ? [{ label: 'Curve', value: curve }] : []),
+        ...(td ? [{ label: 'TD', value: td }] : []),
+        ...(tc && tc !== '1' ? [{ label: 'Torque ctl', value: tc }] : []),
+      ],
+    };
+  }
+
+  // 67-series directional OC: 67G2T, 67P1T… — pickup lives in the 50-series key.
+  m = id.match(/^67(P|N|G|Q)(\d)(T)?$/);
+  if (m) {
+    const pk = fmtAmps(rawSetting(map, `50${m[1]}${m[2]}P`));
+    if (pk === null) return null;
+    const delay = rawSetting(map, `67${m[1]}${m[2]}D`);
+    const tc    = rawSetting(map, `67${m[1]}${m[2]}TC`);
+    return {
+      icon: '⚡',
+      subtitle: `${tag} · Directional OC ${m[3] === 'T' ? '(timed out)' : '(pickup)'}`,
+      settings: [
+        { label: 'Pickup', value: pk },
+        ...(delay ? [{ label: 'Delay', value: `${delay} cyc` }] : []),
+        ...(tc && tc !== '1' ? [{ label: 'Torque ctl', value: tc }] : []),
+      ],
+    };
+  }
+
+  // 50-series instantaneous: 50P1, 50G2, 50N1…
+  m = id.match(/^50(P|N|G|Q)(\d)$/);
+  if (m) {
+    const pk = fmtAmps(rawSetting(map, `${id}P`));
+    if (pk === null) return null;
+    return {
+      icon: '⚡',
+      subtitle: `${tag} · Instantaneous OC`,
+      settings: [
+        { label: 'Pickup', value: pk },
+        { label: 'Delay', value: '0 ms (inst)' },
+      ],
+    };
+  }
+
+  return null;
+}
+
 // ─── Per-kind builders ────────────────────────────────────────────────────────
 
 function buildProtectionInfo(
@@ -112,6 +195,9 @@ function buildProtectionInfo(
   tag: string,
   map: SettingsMap,
 ): Omit<NodeDisplayInfo, 'kind' | 'toggleable'> {
+  // SEL-351-family direct setting keys take priority when present.
+  const direct = sel351DirectInfo(nodeId, tag, map);
+  if (direct) return direct;
   // For trip word bits (51P1T) resolve to the pickup element (51P1P) so the
   // pickup/TD/curve settings are found.
   const elemId = _isTripWordBit(nodeId) ? resolvePickupBit(nodeId) : nodeId;

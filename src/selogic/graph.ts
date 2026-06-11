@@ -14,6 +14,14 @@ export interface GraphNode {
   dependencies: string[];   // signal names this node depends on
   dependents: string[];     // signal names that depend on this node
   depth: number;        // topological depth (0 = raw inputs)
+  /**
+   * Set for nodes synthesized from SEL conventions rather than explicit equations:
+   *  'seal'  — TRIP/CLOSE word bit (asserts with TR/CL, seals in until ULTR/ULCL)
+   *  'latch' — LTn latch bit driven by SETn/RSTn (RST-dominant)
+   *  'svt'   — SVnT timed bit fed by SVn through the PU/DO timer
+   * Rendering draws these with direct labelled input pins instead of gate trees.
+   */
+  synthetic?: 'seal' | 'latch' | 'svt';
 }
 
 export interface DependencyGraph {
@@ -92,25 +100,86 @@ export function buildDependencyGraph(equations: LogicEquation[]): DependencyGrap
     }
   }
 
-  // Synthesize SV timed-bit links: a referenced `SVnT` (timed word bit) tracks
-  // its raw `SVn` SELOGIC variable through the PU/DO timer. This connects the
-  // SV's upstream logic to the SVnT bit and lets simulation propagate SVn→SVnT.
+  // ── Synthesis from SEL conventions ──────────────────────────────────────────
+  // Several SEL-351 word bits have no explicit defining equation in the settings
+  // file but follow fixed internal logic. Synthesize them so the graph shows the
+  // complete chain and simulation propagates through it.
+
+  const NO_SRC = { sourceFile: '', lineNumber: 0, rawText: '' };
+  const isLive = (n?: GraphNode): boolean =>
+    !!n?.equation && !/^\s*0\s*$/.test(n.equation.expression);
+  const wire = (depId: string, nodeId: string) => {
+    const dep = nodes.get(depId);
+    if (dep && !dep.dependents.includes(nodeId)) dep.dependents.push(nodeId);
+  };
+
+  // 1. SVnT timed bits: SVn (SELOGIC variable) → PU/DO timer → SVnT.
   for (const [id, node] of nodes) {
     if (!/^SV\d+T$/i.test(id) || !node.isInput) continue;
     const base = id.replace(/T$/i, '');
     const baseNode = nodes.get(base);
     if (!baseNode) continue;
     node.isInput = false;
+    node.synthetic = 'svt';
     node.dependencies = [base];
     node.description = `${base} timed output (PU/DO)`;
     node.equation = {
-      label: id,
-      expression: base,
-      description: node.description,
-      source: baseNode.equation?.source ?? { sourceFile: '', lineNumber: 0, rawText: '' },
-      functionType: 'TIMER_OUT',
+      label: id, expression: base, description: node.description,
+      source: baseNode.equation?.source ?? NO_SRC, functionType: 'TIMER_OUT',
     };
-    if (!baseNode.dependents.includes(id)) baseNode.dependents.push(id);
+    wire(base, id);
+  }
+
+  // 2. LTn latch bits: driven by SETn/RSTn (or LTnS/LTnR). RST-dominant per
+  //    the SEL-351 latch-control model: LTn = !RSTn * (SETn + LTn).
+  //    The self-reference reads the previous scan's value, giving real seal-in.
+  for (const [id, node] of nodes) {
+    const m = id.match(/^LT(\d+)$/i);
+    if (!m || !node.isInput) continue;
+    const setNode = [nodes.get(`SET${m[1]}`), nodes.get(`LT${m[1]}S`)].find(isLive);
+    const rstNode = [nodes.get(`RST${m[1]}`), nodes.get(`LT${m[1]}R`)].find(isLive);
+    if (!setNode) continue;
+    const deps = rstNode ? [setNode.id, rstNode.id] : [setNode.id];
+    const expr = rstNode
+      ? `!${rstNode.id}*(${setNode.id}+${id})`
+      : `${setNode.id}+${id}`;
+    node.isInput = false;
+    node.synthetic = 'latch';
+    node.dependencies = deps;
+    node.description = `Latch bit ${id} (SET/RST, reset-dominant)`;
+    node.equation = {
+      label: id, expression: expr, description: node.description,
+      source: setNode.equation?.source ?? NO_SRC, functionType: 'LATCH_SET',
+    };
+    for (const d of deps) wire(d, id);
+  }
+
+  // 3. TRIP / CLOSE word bits: assert with the TR / CL equation and seal in
+  //    until the corresponding unlatch equation (ULTR / ULCL) asserts.
+  const sealPairs: Array<[string, string, string]> = [
+    ['TRIP', 'TR', 'ULTR'],
+    ['CLOSE', 'CL', 'ULCL'],
+  ];
+  for (const [bit, drv, ul] of sealPairs) {
+    const node = nodes.get(bit);
+    const drvNode = nodes.get(drv);
+    if (!node || !node.isInput || !isLive(drvNode)) continue;
+    const ulNode = isLive(nodes.get(ul)) ? nodes.get(ul)! : null;
+    const deps = ulNode ? [drv, ul] : [drv];
+    const expr = ulNode ? `${drv}+${bit}*!${ul}` : drv;
+    node.isInput = false;
+    node.isOutput = true;
+    node.synthetic = 'seal';
+    node.dependencies = deps;
+    node.description = ulNode
+      ? `${bit} word bit — asserts with ${drv}, seals in until ${ul}`
+      : `${bit} word bit — follows ${drv}`;
+    node.equation = {
+      label: bit, expression: expr, description: node.description,
+      source: drvNode!.equation?.source ?? NO_SRC,
+      functionType: bit === 'TRIP' ? 'TRIP' : 'OUTPUT',
+    };
+    for (const d of deps) wire(d, bit);
   }
 
   // Third pass: compute topological depth via BFS from roots

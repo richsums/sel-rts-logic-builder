@@ -42,7 +42,7 @@ export interface PartitionResult {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const COIL_IDS = new Set(['TR', 'TRIP', 'CL', 'CLOSE', 'ALARM']);
+const COIL_IDS = new Set(['TR', 'TRIP', 'CL', 'CLOSE', 'ALARM', 'ALRMOUT']);
 
 // An output expression that drives nothing (e.g. "OUT104 = 0", "NA", blank).
 const DISABLED_EXPR_RE = /^\s*(|0|NA|N\/A|OFF|N|NONE)\s*$/i;
@@ -51,7 +51,7 @@ function coilPurpose(id: string): string {
   const u = id.toUpperCase();
   if (/^(TR|TRIP)$/.test(u)) return 'Trip';
   if (/^(CL|CLOSE)$/.test(u)) return 'Close';
-  if (/^ALARM/.test(u)) return 'Alarm';
+  if (/^(ALARM|ALRMOUT|SALARM)$/.test(u)) return 'Alarm';
   if (/^OUT/.test(u)) return 'Output';
   return id;
 }
@@ -102,24 +102,42 @@ export function partitionGraph(
     }
   }
 
-  // ── 1. One area per *driven* output contact ──────────────────────────────
+  // ── 1. One area per driven coil, with EVERY contact that routes it ────────
+  // OUT101 = TRIP and OUT103 = TRIP belong in one "Trip" window, downstream of
+  // the TR element, so the tester sees all physical outputs that must operate.
+  const coilGroups = new Map<string, { contacts: string[]; ops: string[] }>();
   for (const [outId, expr] of contacts) {
     if (DISABLED_EXPR_RE.test(expr)) continue;   // OUT104 = 0 → not displayed
     const ops = signalsInExpr(expr);
-    const cone = upstreamClosure(graph, ops);
-    cone.add(outId);
+    const routedCoil = ops.length === 1 &&
+      (graph.nodes.has(ops[0]) || COIL_IDS.has(ops[0].toUpperCase()))
+      ? ops[0] : null;
+    const key = routedCoil ?? `__solo_${outId}`;
+    if (!coilGroups.has(key)) coilGroups.set(key, { contacts: [], ops: [] });
+    const g = coilGroups.get(key)!;
+    g.contacts.push(outId);
+    for (const op of ops) if (!g.ops.includes(op)) g.ops.push(op);
+  }
+
+  for (const [key, g] of coilGroups) {
+    const routedCoil = key.startsWith('__solo_') ? null : key;
+    const cone = upstreamClosure(graph, g.ops);
+    for (const c of g.contacts) cone.add(c);
     for (const id of cone) usedSignalIds.add(id);
 
-    const routedCoil = ops.length === 1 ? ops[0] : null;
+    const anchor = g.contacts[0];
+    const soloPurpose = coilPurpose(g.contacts[0]);
     const label = routedCoil
-      ? `${coilPurpose(routedCoil)} — ${outId} / ${routedCoil}`
-      : `${outId} Logic`;
+      ? `${coilPurpose(routedCoil)} — ${g.contacts.join(' / ')} / ${routedCoil}`
+      : soloPurpose !== 'Output' && soloPurpose !== g.contacts[0]
+        ? `${soloPurpose} — ${g.contacts[0]}`        // e.g. "Alarm — ALRMOUT"
+        : `${g.contacts[0]} Logic`;
 
     areas.push({
-      id: `area_${outId}`,
+      id: `area_${anchor}`,
       label,
       kind: 'output',
-      rootIds: routedCoil ? [outId, routedCoil] : [outId],
+      rootIds: routedCoil ? [...g.contacts, routedCoil] : [...g.contacts],
       nodeIds: [...cone],
     });
   }
@@ -132,6 +150,9 @@ export function partitionGraph(
     if (/^OUT\d+$/i.test(id)) continue;          // contact itself, handled above
     if (node.dependencies.length === 0) continue; // not driven
     if (areas.some(a => a.rootIds.includes(id))) continue;
+    // Skip coils already displayed inside another window's cone (e.g. TR lives
+    // upstream of TRIP in the merged Trip window — no second window).
+    if (areas.some(a => a.nodeIds.includes(id))) continue;
 
     const cone = upstreamClosure(graph, [id]);
     for (const s of cone) usedSignalIds.add(s);
@@ -144,7 +165,27 @@ export function partitionGraph(
     });
   }
 
-  // ── 3. SV areas — only SVs actually used by other logic ──────────────────
+  // ── 3. Recloser (79*) logic joins the Close window ────────────────────────
+  // The 79 scheme equations (79RI, 79RIS, 79DTL, 79DLS, 79STL, …) belong with
+  // the close logic the tester proves, not scattered in their own windows.
+  const closeArea = areas.find(a =>
+    a.rootIds.some(r => /^(CL|CLOSE)$/i.test(r)) ||
+    a.nodeIds.some(id => /^(CL|CLOSE)$/i.test(id)),
+  );
+  if (closeArea) {
+    const closeSet = new Set(closeArea.nodeIds);
+    for (const [id, node] of graph.nodes) {
+      if (!/^79/.test(id)) continue;
+      if (!node.equation || DISABLED_EXPR_RE.test(node.equation.expression)) continue;
+      for (const s of upstreamClosure(graph, [id])) {
+        closeSet.add(s);
+        usedSignalIds.add(s);
+      }
+    }
+    closeArea.nodeIds = [...closeSet];
+  }
+
+  // ── 4. SV areas — every SV programmed with real logic (equation ≠ 0) ──────
   const svNumbers = new Set<string>();
   for (const id of graph.nodes.keys()) {
     const m = id.match(/^SV(\d+)[SRT]?$/i);
@@ -152,19 +193,25 @@ export function partitionGraph(
   }
   for (const n of svNumbers) {
     const bit = `SV${n}`;
-    const setEq = `SV${n}S`;
-    const rstEq = `SV${n}R`;
-    // "Used in other logic" = the SV bit is referenced inside an output cone.
-    const isUsed = usedSignalIds.has(bit) || usedSignalIds.has(`SV${n}T`);
-    if (!isUsed) continue;
-    const starts = [bit, setEq, rstEq].filter(id => graph.nodes.has(id) || id === bit);
+    const timed = `SV${n}T`;
+    const bitNode = graph.nodes.get(bit);
+    const setNode = graph.nodes.get(`SV${n}S`);
+    // Live = the SV variable (or its set equation) is programmed, not "0".
+    const live = (nd?: { equation?: { expression: string } }) =>
+      !!nd?.equation && !DISABLED_EXPR_RE.test(nd.equation.expression);
+    if (!live(bitNode) && !live(setNode)) continue;
+
+    const starts = [timed, bit, `SV${n}S`, `SV${n}R`].filter(id => graph.nodes.has(id));
     const cone = upstreamClosure(graph, starts);
     cone.add(bit);
+    for (const s of cone) usedSignalIds.add(s);
     areas.push({
       id: `area_SV${n}`,
-      label: `SV${n} — Set / Reset + PU/DO`,
+      label: graph.nodes.has(timed)
+        ? `SV${n} → SV${n}T — PU/DO timed`
+        : `SV${n} — Set / Reset + PU/DO`,
       kind: 'sv',
-      rootIds: [bit],
+      rootIds: graph.nodes.has(timed) ? [timed, bit] : [bit],
       nodeIds: [...cone],
     });
   }

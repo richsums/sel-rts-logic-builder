@@ -69,3 +69,106 @@ describe('generateAllTestCasesByArea', () => {
     expect(generateAllTestCasesByArea(graph, null)).toEqual([]);
   });
 });
+
+// ─── SEL-351S real-file conventions (ELR F351A) ──────────────────────────────
+
+import { propagate, initialSignalStates } from '../graph/propagate';
+import { partitionGraph } from '../graph/partition';
+
+const SEL351_EQS: LogicEquation[] = [
+  eq('TR', '51P1T+51G1T+67P1T+67G1T+67G2T', 'TRIP'),
+  eq('ULTR', '!(51P1+51G1)', 'GENERAL'),
+  eq('CL', 'CC', 'GENERAL'),
+  eq('ULCL', 'TRIP+!(CLOSE+CC+79CY)', 'GENERAL'),
+  eq('SET2', '(PB2*!LT5+IN104*LT5)*!LT2', 'LATCH_SET'),
+  eq('RST2', '(PB2*!LT5+!IN104*LT5)*LT2', 'LATCH_RESET'),
+  eq('SV2', 'TRIP', 'GENERAL'),
+  eq('OUT101', 'TRIP', 'OUTPUT'),
+  eq('OUT102', 'CLOSE', 'OUTPUT'),
+  eq('OUT103', 'TRIP', 'OUTPUT'),
+  eq('OUT104', 'SV2T', 'OUTPUT'),
+  eq('ALRMOUT', '!(SALARM+HALARM)', 'ALARM'),
+  eq('LED2', 'LT2', 'GENERAL'),
+];
+
+const SEL351_RELAY: ParsedRelaySettings = {
+  model: 'SEL-351', tag: 'ELR', firmware: '',
+  settingGroups: [{
+    name: 'L1',
+    entries: [
+      entry('OUT101', 'TRIP'), entry('OUT102', 'CLOSE'),
+      entry('OUT103', 'TRIP'), entry('OUT104', 'SV2T'),
+      entry('ALRMOUT', '!(SALARM+HALARM)'),
+      entry('SV2PU', '20.00'), entry('SV2DO', '6.00'),
+    ],
+    source: src,
+  }],
+  logicEquations: SEL351_EQS,
+  rawLines: [], sourceFile: 'test', lineCount: 0,
+};
+
+describe('SEL-351S synthesis (TRIP seal, latches)', () => {
+  const graph = buildDependencyGraph(SEL351_EQS);
+
+  it('synthesizes TRIP from TR with ULTR unlatch', () => {
+    const trip = graph.nodes.get('TRIP');
+    expect(trip?.synthetic).toBe('seal');
+    expect(trip?.dependencies).toEqual(['TR', 'ULTR']);
+  });
+
+  it('asserting 51P1T propagates TR → TRIP → OUT101 and OUT103', () => {
+    const r = propagate(initialSignalStates(graph), { '51P1T': 1 }, graph);
+    expect(r.newStates['TR']).toBe(1);
+    expect(r.newStates['TRIP']).toBe(1);
+    expect(r.newStates['OUT101']).toBe(1);
+    expect(r.newStates['OUT103']).toBe(1);
+  });
+
+  it('TRIP seals in while a pickup holds ULTR low, drops when pickups clear', () => {
+    let states = initialSignalStates(graph);
+    states = propagate(states, { '51P1': 1, '51P1T': 1 }, graph).newStates;
+    expect(states['TRIP']).toBe(1);
+    // Timed bit drops but pickup still asserted → ULTR=0 → TRIP stays sealed
+    states = propagate(states, { '51P1T': 0 }, graph).newStates;
+    expect(states['TRIP']).toBe(1);
+    // Pickup clears → ULTR=1 → TRIP unlatches
+    states = propagate(states, { '51P1': 0 }, graph).newStates;
+    expect(states['TRIP']).toBe(0);
+  });
+
+  it('synthesizes LT2 latch that toggles on PB2 press cycles', () => {
+    const lt2 = graph.nodes.get('LT2');
+    expect(lt2?.synthetic).toBe('latch');
+    let states = initialSignalStates(graph);
+    states = propagate(states, { PB2: 1 }, graph).newStates;  // press
+    expect(states['LT2']).toBe(1);
+    states = propagate(states, { PB2: 0 }, graph).newStates;  // release — holds
+    expect(states['LT2']).toBe(1);
+    states = propagate(states, { PB2: 1 }, graph).newStates;  // press again
+    expect(states['LT2']).toBe(0);                             // toggles off
+  });
+
+  it('merges all =TRIP contacts into one Trip window with ULTR in its cone', () => {
+    const { areas } = partitionGraph(graph, SEL351_RELAY);
+    const trip = areas.find(a => /^Trip/.test(a.label));
+    expect(trip).toBeDefined();
+    expect(trip!.rootIds).toEqual(expect.arrayContaining(['OUT101', 'OUT103', 'TRIP']));
+    expect(trip!.nodeIds).toEqual(expect.arrayContaining(['TR', 'ULTR', '51P1T', '67G2T']));
+    // No separate window for OUT103
+    expect(areas.filter(a => a.rootIds.includes('OUT103'))).toHaveLength(1);
+  });
+
+  it('creates an ALRMOUT alarm window', () => {
+    const { areas } = partitionGraph(graph, SEL351_RELAY);
+    const alarm = areas.find(a => a.rootIds.includes('ALRMOUT'));
+    expect(alarm).toBeDefined();
+    expect(alarm!.nodeIds).toEqual(expect.arrayContaining(['SALARM', 'HALARM']));
+  });
+
+  it('creates an SV2 area containing the SV2→SV2T timed chain', () => {
+    const { areas } = partitionGraph(graph, SEL351_RELAY);
+    const sv = areas.find(a => a.id === 'area_SV2');
+    expect(sv).toBeDefined();
+    expect(sv!.nodeIds).toEqual(expect.arrayContaining(['SV2', 'SV2T']));
+  });
+});

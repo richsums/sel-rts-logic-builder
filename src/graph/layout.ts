@@ -242,6 +242,7 @@ export function classifyNodeColumn(nodeId: string, nodeType?: string): number {
   if (
     /^out-/i.test(nodeId) ||          // out-OUTxxx prefix form
     /^OUT\d+$/.test(id) ||             // OUTxxx bare form
+    id === 'ALRMOUT' ||                // SEL-351S alarm contact
     nodeType === 'outputContactNode'
   ) return 6;
 

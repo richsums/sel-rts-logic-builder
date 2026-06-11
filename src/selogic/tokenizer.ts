@@ -27,6 +27,7 @@ const SINGLE_CHAR_OPS: Record<string, TokenType> = {
   '&': 'AND',
   '|': 'OR',
   '^': 'EDGE',
+  '/': 'EDGE',   // SEL-351 classic rising-edge prefix (e.g. "/TRIP")
 };
 
 /** Keyword operator mapping (case-insensitive) */

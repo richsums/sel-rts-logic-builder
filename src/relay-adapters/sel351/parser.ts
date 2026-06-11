@@ -9,8 +9,11 @@ function inferFunctionType(label: string): LogicFunctionType {
   if (u.endsWith('TC')) return 'TIMER_IN';
   if (u.endsWith('S') && u.startsWith('LT')) return 'LATCH_SET';
   if (u.endsWith('R') && u.startsWith('LT')) return 'LATCH_RESET';
+  // SEL-351S latch equations: SETn / RSTn drive latch bit LTn
+  if (/^SET\d+$/.test(u)) return 'LATCH_SET';
+  if (/^RST\d+$/.test(u)) return 'LATCH_RESET';
   if (u.startsWith('OUT')) return 'OUTPUT';
-  if (u === 'ALARM') return 'ALARM';
+  if (u === 'ALARM' || u === 'ALRMOUT' || u === 'SALARM' || u === 'HALARM') return 'ALARM';
   if (u.startsWith('50') || u.startsWith('67')) return 'PICKUP';
   if (u.startsWith('51')) return 'PICKUP';
   return 'GENERAL';
@@ -64,9 +67,15 @@ export function parseSEL351(text: string, filename: string): ParsedRelaySettings
       /^L[1-6]$/.test(group.name) ||   // [L1]–[L6] logic settings
       /^[1-6]$/.test(group.name);       // [1]–[6] protection group settings
     if (!isLogicSection) continue;
+    // In [L1]–[L6] / SELOGIC sections EVERY entry is a SELOGIC equation —
+    // including simple aliases with no operator (SV2 = TRIP, LED1 = LT1,
+    // 52A = IN101, SET8 = SV2T). Only protection-group [1]–[6] sections mix
+    // numeric settings with logic, so only those keep the strict label filter.
+    const everyEntryIsLogic = /^L[1-6]$/.test(group.name) || group.name.includes('SELOGIC');
     for (const entry of group.entries) {
       // Logic equations have known labels or look like signal assignments
       const isLogic =
+        everyEntryIsLogic ||
         entry.key in SEL351_LOGIC_LABELS ||
         /^(TR|CL|TRIP|CLOSE|ALARM|OUT\d+|LT\d[SR]|M\d+|\d+(P|G|N|Q)\d*(TC|T|S|R)?|67[PGN]\d*)$/.test(entry.key);
 

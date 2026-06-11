@@ -26,6 +26,8 @@ export interface GraphNodeData {
   signalState: 0 | 1;
   /** 'idle' | 'flash-on' | 'flash-off' | 'trip-pulse' | 'blocked' */
   animState: string;
+  /** Labelled input pins for synthesized nodes: 'latch' (SET/RST) or 'seal' (operate/unlatch). */
+  pins?: 'latch' | 'seal';
   /** Timer fill progress 0.0–1.0 (only used by timerNode). */
   timerProgress?: number;
   /** Timer phase (only used by timerNode for arc coloring). */
@@ -239,7 +241,7 @@ export function TimerNode({ id, data }: NodeProps<GraphNodeData>) {
 // ─── LatchNode ────────────────────────────────────────────────────────────────
 
 export function LatchNode({ id, data }: NodeProps<GraphNodeData>) {
-  const { displayInfo, signalState, animState } = data;
+  const { displayInfo, signalState, animState, pins } = data;
   const border = stateBorderColor(signalState, 'latch');
 
   return (
@@ -247,7 +249,17 @@ export function LatchNode({ id, data }: NodeProps<GraphNodeData>) {
       className="rounded-lg min-w-[130px] max-w-[170px] transition-shadow duration-200"
       style={{ border: `2px solid ${border}`, padding: '6px 10px', background: 'var(--surface, white)', color: 'var(--text, #0f172a)', ...stateGlow(signalState, animState) }}
     >
-      {inputHandle}
+      {pins ? (
+        <>
+          {/* Labelled SET / RST input pins (synthesized latch bit) */}
+          <Handle type="target" position={Position.Left} id="set"
+            style={{ ...HANDLE_STYLE, top: '30%' }} />
+          <Handle type="target" position={Position.Left} id="rst"
+            style={{ ...HANDLE_STYLE, top: '72%' }} />
+          <span className="absolute text-[8px] font-bold text-green-600" style={{ left: 3, top: 'calc(30% - 6px)' }}>S</span>
+          <span className="absolute text-[8px] font-bold text-red-500" style={{ left: 3, top: 'calc(72% - 6px)' }}>R</span>
+        </>
+      ) : inputHandle}
       <div className="flex items-start justify-between gap-1">
         <div className="min-w-0">
           <div className="text-xs font-bold font-mono truncate">🔒 {data.nodeId ?? id}</div>
@@ -323,7 +335,7 @@ export function InputSignalNode({ id, data }: NodeProps<GraphNodeData>) {
 // ─── TripOutputNode ───────────────────────────────────────────────────────────
 
 export function TripOutputNode({ id, data }: NodeProps<GraphNodeData>) {
-  const { displayInfo, signalState, animState } = data;
+  const { displayInfo, signalState, animState, pins } = data;
   const isTripped = signalState === 1;
   const isPulsing = animState === 'trip-pulse';
 
@@ -345,7 +357,17 @@ export function TripOutputNode({ id, data }: NodeProps<GraphNodeData>) {
           <div className="absolute inset-0 rounded-xl border-2 border-red-300 animate-ping opacity-50" style={{ animationDelay: '0.15s' }} />
         </>
       )}
-      {inputHandle}
+      {pins === 'seal' ? (
+        <>
+          {/* Operate (set) + Unlatch (rst) input pins for the seal-in word bit */}
+          <Handle type="target" position={Position.Left} id="set"
+            style={{ ...HANDLE_STYLE, top: '32%' }} />
+          <Handle type="target" position={Position.Left} id="rst"
+            style={{ ...HANDLE_STYLE, top: '72%' }} />
+          <span className="absolute z-20 text-[8px] font-bold text-white/90" style={{ left: 3, top: 'calc(32% - 6px)' }}>OP</span>
+          <span className="absolute z-20 text-[8px] font-bold text-white/70" style={{ left: 3, top: 'calc(72% - 6px)' }}>UL</span>
+        </>
+      ) : inputHandle}
       <div className="relative z-10">
         <div className="text-sm font-bold font-mono">
           {'⚡ ' + (data.nodeId ?? id)}
@@ -362,6 +384,8 @@ export function TripOutputNode({ id, data }: NodeProps<GraphNodeData>) {
           {isTripped ? 'ASSERTED' : 'NORMAL'}
         </div>
       </div>
+      {/* Source handle: TR/CL feed the TRIP/CLOSE word bits downstream */}
+      {outputHandle}
     </div>
   );
 }
@@ -382,8 +406,8 @@ export type GateType = 'and' | 'or' | 'not' | 'edge';
 
 export interface GateNodeData {
   gateType:    GateType;
-  /** Number of input signals connected (1 for NOT/EDGE, 2 for AND/OR). */
-  inputCount:  1 | 2;
+  /** Number of input signals connected (1 for NOT/EDGE; n for flattened AND/OR chains). */
+  inputCount:  number;
   signalState: 0 | 1;
   animState:   string;
 }
@@ -485,28 +509,27 @@ export function LogicGateSymbolNode({ id: _id, data }: NodeProps<GateNodeData>) 
       ? { boxShadow: '0 0 0 2px #f97316, 0 0 8px 3px #f9731644' }
       : {};
 
-  // Input handle positions: centred for 1 input, staggered for 2
-  const inputHandleA = inputCount === 2
-    ? { top: '33%' }
-    : { top: '50%', transform: 'translateY(-50%)' };
-  const inputHandleB = { top: '67%' };
+  // One target handle per input, evenly distributed down the left edge.
+  // Gate grows taller with fan-in so a 5-input OR stays readable.
+  const n = Math.max(1, inputCount);
+  const height = Math.max(44, n * 14 + 16);
 
   return (
     <div
       className="relative flex items-center justify-center transition-shadow duration-200"
-      style={{ width: 64, height: 44, ...glowStyle }}
+      style={{ width: 64, height, ...glowStyle }}
     >
-      {/* Input handles */}
-      <Handle
-        type="target" position={Position.Left} id="a"
-        style={{ background: 'transparent', border: 'none', width: 8, height: 8, ...inputHandleA }}
-      />
-      {inputCount === 2 && (
+      {/* Input handles in0..in{n-1} */}
+      {Array.from({ length: n }, (_, k) => (
         <Handle
-          type="target" position={Position.Left} id="b"
-          style={{ background: 'transparent', border: 'none', width: 8, height: 8, ...inputHandleB }}
+          key={k}
+          type="target" position={Position.Left} id={`in${k}`}
+          style={{
+            background: 'transparent', border: 'none', width: 8, height: 8,
+            top: `${((k + 1) / (n + 1)) * 100}%`,
+          }}
         />
-      )}
+      ))}
 
       {/* Gate SVG body */}
       <svg viewBox="0 0 48 32" width={56} height={38} style={{ overflow: 'visible' }}>

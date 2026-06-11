@@ -80,3 +80,23 @@ export function extractEnabledPushbuttons(relay: ParsedRelaySettings | null): Le
   }
   return items.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
 }
+
+/**
+ * Front-panel pushbuttons in use: on the SEL-351S, PBn are hardware buttons —
+ * there is no `PBn = expr` setting. A button is "in use" when its word bit is
+ * referenced inside any SELOGIC equation (e.g. SET2 = (PB2*!LT5+…)).
+ */
+export function extractReferencedPushbuttons(relay: ParsedRelaySettings | null): LedPbItem[] {
+  if (!relay) return [];
+  const seen = new Set<string>();
+  const items: LedPbItem[] = [];
+  for (const eq of relay.logicEquations) {
+    for (const m of eq.expression.toUpperCase().matchAll(/\bPB(\d+)\b/g)) {
+      const id = `PB${m[1]}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      items.push({ id, expression: '(hardware pushbutton)', note: `used in ${eq.label}` });
+    }
+  }
+  return items.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+}
