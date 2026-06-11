@@ -40,6 +40,10 @@ export interface UIState {
   // ── Logic-area windows ────────────────────────────────────────────────────
   /** Whether LED / front-panel PB areas are shown on the graph. */
   showLedPb: boolean;
+  /** Whether SV (SELOGIC variable/timer) windows are shown on the graph. */
+  showSvAreas: boolean;
+  /** Whether LT (latch bit) windows are shown on the graph. */
+  showLtAreas: boolean;
   /** Whether the relay front-panel mockup overlay is shown. */
   showFrontPanel: boolean;
   /** Area ids the user has hidden from the graph. */
@@ -82,6 +86,10 @@ export interface UIState {
 
   /** Toggle LED / PB areas on the graph. */
   toggleLedPb: () => void;
+  /** Toggle SV windows on the graph. */
+  toggleSvAreas: () => void;
+  /** Toggle LT latch windows on the graph. */
+  toggleLtAreas: () => void;
   /** Toggle the front-panel mockup overlay. */
   toggleFrontPanel: () => void;
   /** Hide a logic area (window) from the graph. */
@@ -144,6 +152,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   graphViewport:  DEFAULT_VIEWPORT,
   graphProjectId: null,
   showLedPb:      false,
+  showSvAreas:    true,
+  showLtAreas:    true,
   showFrontPanel: false,
   hiddenAreaIds:  [],
 
@@ -182,6 +192,8 @@ export const useUIStore = create<UIState>((set, get) => ({
     ),
 
   toggleLedPb: () => set(state => ({ showLedPb: !state.showLedPb })),
+  toggleSvAreas: () => set(state => ({ showSvAreas: !state.showSvAreas })),
+  toggleLtAreas: () => set(state => ({ showLtAreas: !state.showLtAreas })),
   toggleFrontPanel: () => set(state => ({ showFrontPanel: !state.showFrontPanel })),
   hideArea: (areaId) =>
     set(state =>

@@ -846,10 +846,10 @@ export function renderAnalogScript(
   // We do this by building the script normally and then injecting the preamble.
   let script: string;
   switch (protFn) {
-    case '51P':  script = buildTOCConstantScript('51P', map, relay, elementLabel, tc.sourceLines, tc.pattern, 2); break;
-    case '51G':  script = buildTOCConstantScript('51G', map, relay, elementLabel, tc.sourceLines, tc.pattern, 2); break;
-    case '51N':  script = buildTOCConstantScript('51N', map, relay, elementLabel, tc.sourceLines, tc.pattern, 2); break;
-    case 'SEF':  script = buildTOCConstantScript('SEF', map, relay, elementLabel, tc.sourceLines, tc.pattern, 2); break;
+    case '51P':  script = buildTOCConstantScript(elementLabel, map, relay, elementLabel, tc.sourceLines, tc.pattern, 2); break;
+    case '51G':  script = buildTOCConstantScript(elementLabel, map, relay, elementLabel, tc.sourceLines, tc.pattern, 2); break;
+    case '51N':  script = buildTOCConstantScript(elementLabel, map, relay, elementLabel, tc.sourceLines, tc.pattern, 2); break;
+    case 'SEF':  script = buildTOCConstantScript(elementLabel, map, relay, elementLabel, tc.sourceLines, tc.pattern, 2); break;
     case '50P':  script = buildIOCProfile('50P', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
     case '50G':  script = buildIOCProfile('50G', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
     case '50N':  script = buildIOCProfile('50N', map, relay, elementLabel, tc.sourceLines, tc.pattern); break;
@@ -895,7 +895,7 @@ export function renderAllAnalogScripts(
       const map = buildSettingsMap(relay);
       return [2, 3, 4].map((M): { filename: string; content: string } => ({
         filename: `${relay.tag}_${elementLabel}_${M}x.rts`,
-        content:  buildTOCConstantScript(protFn, map, relay, elementLabel, tc.sourceLines, tc.pattern, M),
+        content:  buildTOCConstantScript(elementLabel, map, relay, elementLabel, tc.sourceLines, tc.pattern, M),
       }));
     }
 

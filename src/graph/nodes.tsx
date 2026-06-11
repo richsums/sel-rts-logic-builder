@@ -628,7 +628,7 @@ export function OutputContactNode({ id, data }: NodeProps<OutputContactNodeData>
 
 export interface LogicAreaNodeData {
   label: string;
-  kind: 'output' | 'sv' | 'led' | 'pb';
+  kind: 'output' | 'sv' | 'lt' | 'led' | 'pb';
   areaId: string;
   width: number;
   height: number;
@@ -637,6 +637,7 @@ export interface LogicAreaNodeData {
 const AREA_ACCENT: Record<LogicAreaNodeData['kind'], string> = {
   output: '#3b82f6',
   sv:     '#9333ea',
+  lt:     '#ea580c',
   led:    '#f59e0b',
   pb:     '#0d9488',
 };

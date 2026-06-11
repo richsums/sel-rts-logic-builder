@@ -57,13 +57,13 @@ function GraphViewerInner() {
     graphViewport: storedViewport, graphProjectId,
     signalStates, animationSpeed, lastChangeCount,
     pulsingEdgeIds, flashingNodes,
-    showLedPb, hiddenAreaIds, showFrontPanel,
+    showLedPb, showSvAreas, showLtAreas, hiddenAreaIds, showFrontPanel,
     saveGraphLayout, setGraphLayout,
     setSignalStates, resetSignalStates,
     setAnimationSpeed, setLastChangeCount,
     setPulsingEdgeIds, setFlashingNodes, clearAnimations,
     clearTimerStates,
-    toggleLedPb, toggleFrontPanel, hideArea, showArea, showAllAreas,
+    toggleLedPb, toggleSvAreas, toggleLtAreas, toggleFrontPanel, hideArea, showArea, showAllAreas,
   } = useUIStore();
 
   const { setViewport } = useReactFlow();
@@ -76,8 +76,8 @@ function GraphViewerInner() {
   const hiddenSet = React.useMemo(() => new Set(hiddenAreaIds), [hiddenAreaIds]);
   // Full area list (incl. hidden) for the Areas dropdown.
   const allAreas = React.useMemo(
-    () => (graph ? partitionGraph(graph, relay, { includeLedPb: showLedPb }).areas : []),
-    [graph, relay, showLedPb],
+    () => (graph ? partitionGraph(graph, relay, { includeLedPb: showLedPb, includeSv: showSvAreas, includeLt: showLtAreas }).areas : []),
+    [graph, relay, showLedPb, showSvAreas, showLtAreas],
   );
 
   // ── Toggle handler ──────────────────────────────────────────────────────────
@@ -143,6 +143,8 @@ function GraphViewerInner() {
     // Build fresh area-partitioned layout
     const { nodes: n, edges: e } = buildAreaLayout(graph, relay, states, handleToggle, {
       includeLedPb: showLedPb,
+      includeSv: showSvAreas,
+      includeLt: showLtAreas,
       hiddenAreaIds: new Set(hiddenAreaIds),
     });
     setNodes(n);
@@ -172,6 +174,8 @@ function GraphViewerInner() {
 
     const { nodes: n, edges: e } = buildAreaLayout(graph, relay, signalStates, handleToggle, {
       includeLedPb: showLedPb,
+      includeSv: showSvAreas,
+      includeLt: showLtAreas,
       hiddenAreaIds: new Set(hiddenAreaIds),
     });
     const merged = n.map(nd => {
@@ -184,7 +188,7 @@ function GraphViewerInner() {
     setEdges(e);
     setGraphLayout(merged, e, activeProjectId ?? '');
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showLedPb, hiddenAreaIds]);
+  }, [showLedPb, showSvAreas, showLtAreas, hiddenAreaIds]);
 
   // ── Sync signal states → node/edge data ───────────────────────────────────
   useEffect(() => {
@@ -234,6 +238,8 @@ function GraphViewerInner() {
     clearAnimations();
     const { nodes: n, edges: e } = buildAreaLayout(graph, relay, states, handleToggle, {
       includeLedPb: showLedPb,
+      includeSv: showSvAreas,
+      includeLt: showLtAreas,
       hiddenAreaIds: new Set(hiddenAreaIds),
     });
     setNodes(n);
@@ -313,6 +319,28 @@ function GraphViewerInner() {
           >
             <Lightbulb className="w-3.5 h-3.5" />
             LEDs / PBs
+          </button>
+
+          {/* SV windows toggle */}
+          <button
+            onClick={toggleSvAreas}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+              showSvAreas ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+            title="Show / hide SELOGIC variable (SV) windows — when hidden, SV logic expands inline"
+          >
+            SVs
+          </button>
+
+          {/* LT windows toggle */}
+          <button
+            onClick={toggleLtAreas}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+              showLtAreas ? 'bg-orange-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+            title="Show / hide latch bit (LT) windows — when hidden, latch logic expands inline"
+          >
+            LTs
           </button>
 
           {/* Front-panel mockup toggle */}

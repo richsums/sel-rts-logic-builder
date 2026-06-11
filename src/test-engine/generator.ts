@@ -432,7 +432,33 @@ function areaProofEquation(
   graph: DependencyGraph,
   relay: ParsedRelaySettings,
 ): LogicEquation | null {
-  // Prefer a root that has a real graph equation (coil / SV / latch).
+  // Seal-synthesized word bits (TRIP/CLOSE) resolve to their driver equation
+  // (TR/CL) — for TRIP that is the parsed TRIP-type equation, which routes the
+  // test through per-element ANALOG injection (currents/voltages at the real
+  // pickups) instead of a digital "SET TRIP 1".
+  const resolved = (id: string): LogicEquation | undefined => {
+    const n = graph.nodes.get(id);
+    if (!n?.equation) return undefined;
+    if (n.synthetic === 'seal' && n.dependencies.length > 0) {
+      return graph.nodes.get(n.dependencies[0])?.equation ?? n.equation;
+    }
+    return n.equation;
+  };
+
+  // 1st choice: a root whose (resolved) equation is protection trip logic.
+  for (const r of area.rootIds) {
+    const eq = resolved(r);
+    if (eq?.functionType === 'TRIP') return eq;
+  }
+  // 2nd: any resolved seal/coil equation.
+  for (const r of area.rootIds) {
+    const n = graph.nodes.get(r);
+    if (n?.synthetic === 'seal') {
+      const eq = resolved(r);
+      if (eq) return eq;
+    }
+  }
+  // 3rd: any root with a real graph equation (coil / SV / latch).
   for (const r of area.rootIds) {
     const n = graph.nodes.get(r);
     if (n?.equation) return n.equation;
@@ -463,7 +489,9 @@ export function generateAllTestCasesByArea(
   relay: ParsedRelaySettings | null,
 ): GeneratedTestCase[] {
   if (!relay) return [];
-  const { areas } = partitionGraph(graph, relay, { includeLedPb: true });
+  const { areas } = partitionGraph(graph, relay, {
+    includeLedPb: true, includeSv: true, includeLt: true,
+  });
   const result: GeneratedTestCase[] = [];
   for (const area of areas) {
     const eq = areaProofEquation(area, graph, relay);

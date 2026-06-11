@@ -33,6 +33,8 @@ export interface LogicAreaNodeData {
 
 export interface AreaBuildOptions {
   includeLedPb?: boolean;
+  includeSv?: boolean;
+  includeLt?: boolean;
   hiddenAreaIds?: Set<string>;
 }
 
@@ -62,7 +64,11 @@ export function buildAreaLayout(
   opts: AreaBuildOptions = {},
 ): { nodes: Node[]; edges: Edge[]; areas: LogicArea[] } {
   const hidden = opts.hiddenAreaIds ?? new Set<string>();
-  const { areas } = partitionGraph(graph, relay, { includeLedPb: opts.includeLedPb });
+  const { areas } = partitionGraph(graph, relay, {
+    includeLedPb: opts.includeLedPb,
+    includeSv: opts.includeSv,
+    includeLt: opts.includeLt,
+  });
 
   const outNodes: Node[] = [];
   const outEdges: Edge[] = [];

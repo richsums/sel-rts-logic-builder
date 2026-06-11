@@ -100,6 +100,10 @@ const SEL351_RELAY: ParsedRelaySettings = {
       entry('OUT103', 'TRIP'), entry('OUT104', 'SV2T'),
       entry('ALRMOUT', '!(SALARM+HALARM)'),
       entry('SV2PU', '20.00'), entry('SV2DO', '6.00'),
+      // real Set_1 protection settings
+      entry('51P1P', '2.40'), entry('51P1C', 'U4'), entry('51P1TD', '0.50'),
+      entry('51G1P', '0.45'), entry('51G1C', 'U4'), entry('51G1TD', '2.00'),
+      entry('50G2P', '2.400'), entry('67G2D', '20.00'),
     ],
     source: src,
   }],
@@ -170,5 +174,46 @@ describe('SEL-351S synthesis (TRIP seal, latches)', () => {
     const sv = areas.find(a => a.id === 'area_SV2');
     expect(sv).toBeDefined();
     expect(sv!.nodeIds).toEqual(expect.arrayContaining(['SV2', 'SV2T']));
+  });
+
+  it('Close window stops at the TRIP boundary stub (no upstream trip logic)', () => {
+    const { areas } = partitionGraph(graph, SEL351_RELAY);
+    const close = areas.find(a => /^Close/.test(a.label))!;
+    expect(close.nodeIds).toContain('TRIP');           // stub reference
+    expect(close.nodeIds).not.toContain('TR');         // trip logic stays in Trip window
+    expect(close.nodeIds).not.toContain('51P1T');
+  });
+
+  it('creates LT windows and stubs latches in other windows; toggles remove them', () => {
+    const withLt = partitionGraph(graph, SEL351_RELAY);
+    const lt2 = withLt.areas.find(a => a.id === 'area_LT2');
+    expect(lt2).toBeDefined();
+    expect(lt2!.nodeIds).toEqual(expect.arrayContaining(['LT2', 'SET2', 'RST2', 'PB2']));
+    const withoutLt = partitionGraph(graph, SEL351_RELAY, { includeLt: false });
+    expect(withoutLt.areas.some(a => a.kind === 'lt')).toBe(false);
+    const withoutSv = partitionGraph(graph, SEL351_RELAY, { includeSv: false });
+    expect(withoutSv.areas.some(a => a.kind === 'sv')).toBe(false);
+  });
+
+  it('trip-area tests resolve through TR and carry per-element analog leaves', () => {
+    const cases = generateAllTestCasesByArea(graph, SEL351_RELAY);
+    const tripCases = cases.filter(c => /^Trip/.test(c.areaLabel ?? ''));
+    expect(tripCases.length).toBeGreaterThanOrEqual(5);          // one per leaf element
+    const leaves = tripCases.map(c => c.leafElement).filter(Boolean);
+    expect(leaves).toEqual(expect.arrayContaining(['51P1T', '51G1T', '67G2T']));
+  });
+});
+
+describe('SEL-351 pickup extraction for analog scripts', () => {
+  it('resolves instance keys for word bits (51P1T → 51P1P / 51P1C / 51P1TD)', async () => {
+    const { buildSettingsMap, extractPickupSetting, extractTimeDial, extractCurveType } =
+      await import('../rts/settings-extractor');
+    const map = buildSettingsMap(SEL351_RELAY);
+    expect(extractPickupSetting(map, '51P1T')).toMatchObject({ value: 2.4, isDefault: false });
+    expect(extractTimeDial(map, '51P1T')).toMatchObject({ value: 0.5, isDefault: false });
+    expect(extractCurveType(map, '51P1T')).toBe('U4');
+    // 67-series uses the 50-series threshold setting
+    expect(extractPickupSetting(map, '67G2T')).toMatchObject({ value: 2.4, isDefault: false });
+    expect(extractPickupSetting(map, '51G1')).toMatchObject({ value: 0.45, isDefault: false });
   });
 });

@@ -20,7 +20,7 @@ import { extractEnabledLeds, extractEnabledPushbuttons } from './ledPb';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-export type AreaKind = 'output' | 'sv' | 'led' | 'pb';
+export type AreaKind = 'output' | 'sv' | 'lt' | 'led' | 'pb';
 
 export interface LogicArea {
   /** Stable area id, e.g. "area_OUT101" / "area_SV1" / "area_LED3". */
@@ -63,14 +63,24 @@ function signalsInExpr(expr: string): string[] {
   return Array.from(collectSignals(ast));
 }
 
-/** Upstream closure over `dependencies`. Includes the start ids themselves. */
-function upstreamClosure(graph: DependencyGraph, starts: string[]): Set<string> {
+/**
+ * Upstream closure over `dependencies`. Includes the start ids themselves.
+ * Nodes in `stopAt` are included as BOUNDARY STUBS — their own upstream logic is
+ * not pulled in, because it lives in that signal's own window (e.g. TRIP inside
+ * the Close window shows as a stub; the trip logic stays in the Trip window).
+ */
+function upstreamClosure(
+  graph: DependencyGraph,
+  starts: string[],
+  stopAt?: Set<string>,
+): Set<string> {
   const seen = new Set<string>();
   const stack = [...starts];
   while (stack.length) {
     const id = stack.pop()!;
     if (seen.has(id)) continue;
     seen.add(id);
+    if (stopAt?.has(id) && !starts.includes(id)) continue;  // boundary stub
     const n = graph.nodes.get(id);
     if (n) for (const d of n.dependencies) if (!seen.has(d)) stack.push(d);
   }
@@ -82,6 +92,10 @@ function upstreamClosure(graph: DependencyGraph, starts: string[]): Set<string> 
 export interface PartitionOptions {
   /** Include LED and front-panel PB areas (default false). */
   includeLedPb?: boolean;
+  /** Include SV windows (default true). When off, SV logic expands inline. */
+  includeSv?: boolean;
+  /** Include LT latch windows (default true). When off, latch logic expands inline. */
+  includeLt?: boolean;
 }
 
 export function partitionGraph(
@@ -89,9 +103,24 @@ export function partitionGraph(
   relay: ParsedRelaySettings | null,
   opts: PartitionOptions = {},
 ): PartitionResult {
+  const includeSv = opts.includeSv ?? true;
+  const includeLt = opts.includeLt ?? true;
   const contacts = parseOutputContacts(relay); // Map<OUTxxx, expr>
   const areas: LogicArea[] = [];
   const usedSignalIds = new Set<string>();
+
+  // ── Window-boundary signals ───────────────────────────────────────────────
+  // Signals that anchor their own window appear as stubs inside other windows
+  // (no upstream expansion there). TRIP/CLOSE always; SVs/LTs only while their
+  // windows are shown — hiding those windows expands the logic inline instead.
+  const boundary = new Set<string>();
+  for (const [id, node] of graph.nodes) {
+    if (node.synthetic === 'seal') boundary.add(id);
+    if (includeLt && node.synthetic === 'latch') boundary.add(id);
+    if (includeSv && (node.synthetic === 'svt' || (/^SV\d+$/i.test(id) && node.equation))) {
+      boundary.add(id);
+    }
+  }
 
   // Coils that a contact routes 1:1 (so we don't also emit a standalone area).
   const routedCoils = new Set<string>();
@@ -121,7 +150,7 @@ export function partitionGraph(
 
   for (const [key, g] of coilGroups) {
     const routedCoil = key.startsWith('__solo_') ? null : key;
-    const cone = upstreamClosure(graph, g.ops);
+    const cone = upstreamClosure(graph, g.ops, boundary);
     for (const c of g.contacts) cone.add(c);
     for (const id of cone) usedSignalIds.add(id);
 
@@ -154,7 +183,7 @@ export function partitionGraph(
     // upstream of TRIP in the merged Trip window — no second window).
     if (areas.some(a => a.nodeIds.includes(id))) continue;
 
-    const cone = upstreamClosure(graph, [id]);
+    const cone = upstreamClosure(graph, [id], boundary);
     for (const s of cone) usedSignalIds.add(s);
     areas.push({
       id: `area_${id}`,
@@ -177,7 +206,7 @@ export function partitionGraph(
     for (const [id, node] of graph.nodes) {
       if (!/^79/.test(id)) continue;
       if (!node.equation || DISABLED_EXPR_RE.test(node.equation.expression)) continue;
-      for (const s of upstreamClosure(graph, [id])) {
+      for (const s of upstreamClosure(graph, [id], boundary)) {
         closeSet.add(s);
         usedSignalIds.add(s);
       }
@@ -191,7 +220,7 @@ export function partitionGraph(
     const m = id.match(/^SV(\d+)[SRT]?$/i);
     if (m) svNumbers.add(m[1]);
   }
-  for (const n of svNumbers) {
+  for (const n of includeSv ? svNumbers : []) {
     const bit = `SV${n}`;
     const timed = `SV${n}T`;
     const bitNode = graph.nodes.get(bit);
@@ -202,7 +231,7 @@ export function partitionGraph(
     if (!live(bitNode) && !live(setNode)) continue;
 
     const starts = [timed, bit, `SV${n}S`, `SV${n}R`].filter(id => graph.nodes.has(id));
-    const cone = upstreamClosure(graph, starts);
+    const cone = upstreamClosure(graph, starts, boundary);
     cone.add(bit);
     for (const s of cone) usedSignalIds.add(s);
     areas.push({
@@ -216,10 +245,26 @@ export function partitionGraph(
     });
   }
 
-  // ── 4. LED & PB areas (optional, behind a toggle) ────────────────────────
+  // ── 5. LT latch windows — one per synthesized latch bit (behind a toggle) ─
+  if (includeLt) {
+    for (const [id, node] of graph.nodes) {
+      if (node.synthetic !== 'latch') continue;
+      const cone = upstreamClosure(graph, [id], boundary);
+      for (const s of cone) usedSignalIds.add(s);
+      areas.push({
+        id: `area_${id}`,
+        label: `${id} — Latch (SET / RST)`,
+        kind: 'lt',
+        rootIds: [id],
+        nodeIds: [...cone],
+      });
+    }
+  }
+
+  // ── 6. LED & PB areas (optional, behind a toggle) ────────────────────────
   if (opts.includeLedPb) {
     for (const led of extractEnabledLeds(relay)) {
-      const cone = upstreamClosure(graph, signalsInExpr(led.expression));
+      const cone = upstreamClosure(graph, signalsInExpr(led.expression), boundary);
       cone.add(led.id);
       areas.push({
         id: `area_${led.id}`,
@@ -230,7 +275,7 @@ export function partitionGraph(
       });
     }
     for (const pb of extractEnabledPushbuttons(relay)) {
-      const cone = upstreamClosure(graph, signalsInExpr(pb.expression));
+      const cone = upstreamClosure(graph, signalsInExpr(pb.expression), boundary);
       cone.add(pb.id);
       areas.push({
         id: `area_${pb.id}`,

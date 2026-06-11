@@ -76,13 +76,18 @@ const DEFAULT_PICKUP: Record<string, number> = {
   'SEF': 0.1,
 };
 
-/** Ordered list of setting keys to try for the curve type. */
+/**
+ * Ordered list of setting keys to try for the curve type.
+ * NOTE: SEL-351 curve keys are `51P1C` / `51G1C`. The `…CT` form is NOT used
+ * here — on the SEL-351, `51P1CT` is the constant-time ADDER setting and would
+ * be misread as a curve code (e.g. "0.00").
+ */
 const CURVE_KEYS: Record<string, string[]> = {
-  '51P': ['51P1CT', '51PCT'],
-  '51G': ['51G1CT', '51GCT'],
-  '51N': ['51N1CT', '51NCT'],
-  '67P': ['67PCT'],
-  '67G': ['67GCT'],
+  '51P': ['51P1C', '51PC'],
+  '51G': ['51G1C', '51GC'],
+  '51N': ['51N1C', '51NC'],
+  '67P': ['67PC'],
+  '67G': ['67GC'],
 };
 
 // ─── Extraction helpers ───────────────────────────────────────────────────────
@@ -96,23 +101,68 @@ function baseElement(label: string): string {
 }
 
 /**
+ * Strip a trailing word-bit suffix (T = timed out, R = reset) from an element
+ * instance id, e.g. '51P1T' → '51P1', '67G2T' → '67G2'. Leaves bare element
+ * names ('87T', '51P') untouched.
+ */
+function stripWordBitSuffix(element: string): string {
+  const u = element.toUpperCase();
+  const m = u.match(/^(\d{2}[PNGQ]\d*)(T|R|TC)$/);
+  return m ? m[1] : u;
+}
+
+/**
+ * SEL-351-family direct setting keys for a full element instance id.
+ * 51P1 → pickup 51P1P / TD 51P1TD / curve 51P1C
+ * 67G2 → pickup 50G2P (67 elements share the 50-series threshold settings)
+ * 50G2 → pickup 50G2P
+ */
+function directKeys(element: string): { pickup: string[]; td: string[]; curve: string[] } {
+  const e = stripWordBitSuffix(element);
+  let m = e.match(/^51([PNGQ])(\d+)$/);
+  if (m) {
+    const base = `51${m[1]}${m[2]}`;
+    return { pickup: [`${base}P`], td: [`${base}TD`], curve: [`${base}C`] };
+  }
+  m = e.match(/^67([PNGQ])(\d+)$/);
+  if (m) {
+    return { pickup: [`50${m[1]}${m[2]}P`, `67${m[1]}${m[2]}P`], td: [], curve: [] };
+  }
+  m = e.match(/^50([PNGQ])(\d+)$/);
+  if (m) {
+    return { pickup: [`${e}P`], td: [], curve: [] };
+  }
+  return { pickup: [], td: [], curve: [] };
+}
+
+function tryNumericKeys(
+  map: SettingsMap,
+  keys: string[],
+): { value: number; key: string } | null {
+  for (const key of keys) {
+    const raw = map.get(key.toUpperCase());
+    // "OFF" means the element is disabled — keep searching / fall to default.
+    if (raw !== undefined && !/^OFF$/i.test(raw.trim())) {
+      const n = parseFloat(raw);
+      if (!isNaN(n)) return { value: n, key };
+    }
+  }
+  return null;
+}
+
+/**
  * Extract the pickup setting for a protection element.
+ * Accepts bare elements ('51P'), instances ('51P1') and word bits ('51P1T').
  * @param map     Flat settings map built by buildSettingsMap()
- * @param element Element identifier (e.g. '51P', '50P1', '87L')
  * @returns       Pickup value (A secondary, or Ω for distance), the key found, and whether a default was used
  */
 export function extractPickupSetting(
   map: SettingsMap,
   element: string,
 ): { value: number; key: string; isDefault: boolean } {
-  const elem = baseElement(element);
-  for (const key of PICKUP_KEYS[elem] ?? []) {
-    const raw = map.get(key.toUpperCase());
-    if (raw !== undefined) {
-      const n = parseFloat(raw);
-      if (!isNaN(n)) return { value: n, key, isDefault: false };
-    }
-  }
+  const elem = baseElement(stripWordBitSuffix(element));
+  const hit = tryNumericKeys(map, [...directKeys(element).pickup, ...(PICKUP_KEYS[elem] ?? [])]);
+  if (hit) return { ...hit, isDefault: false };
   const defaultVal = DEFAULT_PICKUP[elem] ?? 1.0;
   return { value: defaultVal, key: '(default)', isDefault: true };
 }
@@ -125,14 +175,9 @@ export function extractTimeDial(
   map: SettingsMap,
   element: string,
 ): { value: number; key: string; isDefault: boolean } {
-  const elem = baseElement(element);
-  for (const key of TD_KEYS[elem] ?? []) {
-    const raw = map.get(key.toUpperCase());
-    if (raw !== undefined) {
-      const n = parseFloat(raw);
-      if (!isNaN(n)) return { value: n, key, isDefault: false };
-    }
-  }
+  const elem = baseElement(stripWordBitSuffix(element));
+  const hit = tryNumericKeys(map, [...directKeys(element).td, ...(TD_KEYS[elem] ?? [])]);
+  if (hit) return { ...hit, isDefault: false };
   return { value: 1.0, key: '(default)', isDefault: true };
 }
 
@@ -141,8 +186,8 @@ export function extractTimeDial(
  * Returns 'U1' (IEEE Moderately Inverse) if not found.
  */
 export function extractCurveType(map: SettingsMap, element: string): string {
-  const elem = baseElement(element);
-  for (const key of CURVE_KEYS[elem] ?? []) {
+  const elem = baseElement(stripWordBitSuffix(element));
+  for (const key of [...directKeys(element).curve, ...(CURVE_KEYS[elem] ?? [])]) {
     const raw = map.get(key.toUpperCase());
     if (raw !== undefined) return raw.toUpperCase().trim();
   }
