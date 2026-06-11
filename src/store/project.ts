@@ -12,7 +12,7 @@ import type { GeneratedTestCase } from '../test-engine/generator';
 import type { CoverageReport } from '../test-engine/coverage';
 import type { ScriptRecord } from '../export/formats';
 import { buildDependencyGraph } from '../selogic/graph';
-import { generateAllTestCases } from '../test-engine/generator';
+import { generateAllTestCases, generateAllTestCasesByArea } from '../test-engine/generator';
 import { buildCoverageReport } from '../test-engine/coverage';
 import { renderAllAnalogScripts } from '../rts/analog-renderer';
 import { ALL_DEMO_RELAYS } from './demo-data';
@@ -67,13 +67,17 @@ export interface ProjectState {
 /** Build a complete RelayProject from parsed relay settings. */
 function buildProject(relay: ParsedRelaySettings): RelayProject {
   const graph     = buildDependencyGraph(relay.logicEquations);
-  const testCases = generateAllTestCases(relay.logicEquations, graph);
+  // Generate tests grouped by the logic areas shown on the graph; fall back to
+  // per-equation generation if partitioning yields nothing.
+  const byArea    = generateAllTestCasesByArea(graph, relay);
+  const testCases = byArea.length > 0 ? byArea : generateAllTestCases(relay.logicEquations, graph);
   const rendered  = renderAllAnalogScripts(testCases, relay);
   const scripts: ScriptRecord[] = rendered.map((r, i) => ({
     id: uuidv4(),
     label: testCases[i]?.label ?? `Script ${i + 1}`,
     pattern: testCases[i]?.pattern ?? 'A',
     sourceLines: testCases[i]?.sourceLines ?? [],
+    areaLabel: testCases[i]?.areaLabel,
     content: r.content,
     approved: true,
     modified: false,

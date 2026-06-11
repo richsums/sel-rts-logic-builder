@@ -15,7 +15,12 @@ import {
   type SettingsMap,
 } from '../rts/settings-extractor';
 import { computeOperateTime } from '../rts/operate-time';
-import { isTripWordBit as _isTripWordBit } from './protection';
+import { isTripWordBit as _isTripWordBit, resolvePickupBit } from './protection';
+import { isSvBit, svBaseOf } from './svTiming';
+
+// Protection element families that carry a pickup setting (excludes 79 recloser
+// control bits, which are not pickup elements).
+const PICKUP_ELEMENT_RE = /^(50|51|21|87|67|SEF|Z\d)/i;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -79,6 +84,11 @@ function classifyKind(nodeId: string, graph: DependencyGraph): NodeKind {
   // Explicit output checks first
   if (id === 'TR' || id === 'TRIP' || id === 'CL' || id === 'CLOSE') return 'trip';
 
+  // Protection element word bits (51P1T, 67P1T, 50N1…) are protection even when
+  // they are graph inputs — a logic-only view has no upstream pickup node, but we
+  // still want their pickup settings shown. They remain user-toggleable as stimuli.
+  if (PICKUP_ELEMENT_RE.test(id)) return 'protection';
+
   // Input nodes (no defining equation)
   if (node.isInput) return 'input';
 
@@ -102,10 +112,15 @@ function buildProtectionInfo(
   tag: string,
   map: SettingsMap,
 ): Omit<NodeDisplayInfo, 'kind' | 'toggleable'> {
-  const base = baseElement(nodeId);
-  const pickup = extractPickupSetting(map, nodeId);
-  const td     = extractTimeDial(map, nodeId);
-  const curve  = extractCurveType(map, nodeId);
+  // For trip word bits (51P1T) resolve to the pickup element (51P1P) so the
+  // pickup/TD/curve settings are found.
+  const elemId = _isTripWordBit(nodeId) ? resolvePickupBit(nodeId) : nodeId;
+  const base = baseElement(elemId);
+  const pickup = extractPickupSetting(map, elemId);
+  const td     = extractTimeDial(map, elemId);
+  const curve  = extractCurveType(map, elemId);
+  // Show the configured pickup, or "—" when the element settings weren't imported.
+  const pkA = (digits = 2) => (pickup.isDefault ? '—' : `${pickup.value.toFixed(digits)} A`);
 
   // ── Time-Overcurrent (51P / 51G / 51N / 67P / 67G) ──────────────────────
   if (/^(51|67)/.test(base)) {
@@ -115,7 +130,7 @@ function buildProtectionInfo(
       icon:     '⚡',
       subtitle: `${tag} · ${isDir ? 'Directional OC' : 'Time Overcurrent'}`,
       settings: [
-        { label: 'Pickup',       value: `${pickup.value.toFixed(2)} A` },
+        { label: 'Pickup',       value: pkA(2) },
         { label: 'TD',           value: td.value.toFixed(2) },
         { label: 'Curve',        value: curveName(curve) },
         { label: 'tOP @ 2×',    value: isFinite(tAt2x) ? `${tAt2x.toFixed(2)} s` : '—' },
@@ -130,7 +145,7 @@ function buildProtectionInfo(
       icon:     '⚡',
       subtitle: `${tag} · Instantaneous`,
       settings: [
-        { label: 'Pickup', value: `${pickup.value.toFixed(1)} A` },
+        { label: 'Pickup', value: pkA(1) },
         { label: 'Delay',  value: '0 ms (inst)' },
         { label: '',       value: '[PULSE RAMP required]', isBadge: true },
       ],
@@ -181,7 +196,7 @@ function buildProtectionInfo(
     return {
       icon:     '⚡',
       subtitle: `${tag} · SEF`,
-      settings: [{ label: 'Pickup', value: `${pickup.value.toFixed(3)} A` }],
+      settings: [{ label: 'Pickup', value: pkA(3) }],
     };
   }
 
@@ -189,7 +204,7 @@ function buildProtectionInfo(
   return {
     icon:     '⚡',
     subtitle: `${tag} · Protection`,
-    settings: [{ label: 'Pickup', value: `${pickup.value.toFixed(2)} A` }],
+    settings: [{ label: 'Pickup',       value: pkA(2) }],
   };
 }
 
@@ -226,18 +241,25 @@ export function extractDisplaySettings(
   // ── Trip output ───────────────────────────────────────────────────────────
   if (kind === 'trip') {
     const expr = node?.equation?.expression ?? '—';
+    const uid = nodeId.toUpperCase();
+    // Don't call a close/other output a "Trip" output.
+    const role = (uid === 'TR' || uid === 'TRIP') ? 'Trip Output'
+      : (uid === 'CL' || uid === 'CLOSE') ? 'Close Output'
+      : 'Output';
     return {
       kind:      'trip',
       icon:      '⚡',
-      subtitle:  `${tag} · Trip Output`,
+      subtitle:  `${tag} · ${role}`,
       settings:  [{ label: 'Logic', value: expr.length > 24 ? expr.slice(0, 24) + '…' : expr }],
       toggleable: false,
     };
   }
 
-  // ── Timer ─────────────────────────────────────────────────────────────────
+  // ── Timer (incl. SV timed word bit SVnT) ───────────────────────────────────
   if (kind === 'timer') {
-    const baseId = nodeId.toUpperCase().replace(/[SR]$/, ''); // strip S/R suffixes
+    const upper  = nodeId.toUpperCase();
+    const svBase = svBaseOf(upper);                       // "SV2T" → "SV2"
+    const baseId = svBase ?? upper.replace(/[SR]$/, '');  // strip S/R for TD timers
     const puKey  = `${baseId}PU`.toUpperCase();
     const doKey  = `${baseId}DO`.toUpperCase();
     const puTime = getFloat(map, puKey, getFloat(map, 'TD1PU', 0.5));
@@ -245,8 +267,9 @@ export function extractDisplaySettings(
     return {
       kind:           'timer',
       icon:           '⏱',
-      subtitle:       `${tag} · Timer`,
+      subtitle:       svBase ? `${tag} · ${svBase} timed` : `${tag} · Timer`,
       settings: [
+        ...(svBase ? [{ label: 'Asserts from', value: svBase }] : []),
         { label: 'PU Time', value: `${puTime.toFixed(2)} s` },
         { label: 'DO Time', value: `${doTime.toFixed(2)} s` },
       ],
@@ -260,13 +283,18 @@ export function extractDisplaySettings(
   if (kind === 'latch') {
     const expr = node?.equation?.expression ?? '—';
     const ft   = node?.equation?.functionType;
-    const isSet = ft === 'LATCH_SET' || nodeId.toUpperCase().endsWith('S');
+    const upper = nodeId.toUpperCase();
+    const isRawSv = isSvBit(upper);                       // "SV2" (the SELOGIC var)
+    const isSet = ft === 'LATCH_SET' || (!isRawSv && upper.endsWith('S'));
+    const fmt = (s: string) => (s.length > 22 ? s.slice(0, 22) + '…' : s);
+
+    // The SELOGIC equation row — shown for every SV / latch element, like outputs.
     const settings: DisplaySetting[] = [
-      { label: isSet ? 'Set' : 'Reset', value: expr.length > 20 ? expr.slice(0, 20) + '…' : expr },
+      { label: isRawSv ? 'Logic' : isSet ? 'Set' : 'Reset', value: fmt(expr) },
     ];
 
-    // SV supervisory bits also carry PU/DO timing (SVnPU / SVnDO).
-    const svm = nodeId.toUpperCase().match(/^SV(\d+)/);
+    // SV bits carry PU/DO timing (SVnPU / SVnDO).
+    const svm = upper.match(/^SV(\d+)/);
     if (svm) {
       const n = svm[1];
       const get = (k: string) => map.get(k) ?? map.get(k.toUpperCase()) ?? map.get(k.toLowerCase());
@@ -276,10 +304,11 @@ export function extractDisplaySettings(
       if (dop !== undefined) settings.push({ label: 'DO Time', value: `${dop} s` });
     }
 
+    const role = isRawSv ? 'SELOGIC Variable' : isSet ? 'Latch Set' : 'Latch Reset';
     return {
       kind:      'latch',
       icon:      '🔒',
-      subtitle:  `${tag} · ${isSet ? 'Latch Set' : 'Latch Reset'}`,
+      subtitle:  `${tag} · ${role}`,
       settings,
       toggleable: false,
     };
@@ -300,9 +329,12 @@ export function extractDisplaySettings(
   // ── Protection element ────────────────────────────────────────────────────
   const protInfo = buildProtectionInfo(nodeId, tag, map);
   const isTWB = _isTripWordBit(nodeId);
+  // Trip word bits computed from an upstream pickup are locked; but when the bit
+  // is a graph input (logic-only view) it's a stimulus the user toggles to test.
+  const toggleable = (node?.isInput ?? false) || !isTWB;
   return {
     kind:         'protection',
-    toggleable:   !isTWB,   // T-bits are computed, not user-toggleable
+    toggleable,
     isTripWordBit: isTWB,
     ...protInfo,
   };

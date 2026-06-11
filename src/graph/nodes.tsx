@@ -14,7 +14,7 @@
 import React, { useCallback } from 'react';
 import { useThemeStore } from '../store/theme';
 import { useUIStore } from '../store/ui';
-import { Handle, Position, type NodeProps } from 'reactflow';
+import { Handle, Position, NodeResizer, type NodeProps } from 'reactflow';
 import { Lock, X } from 'lucide-react';
 import type { NodeDisplayInfo, DisplaySetting } from './displaySettings';
 
@@ -348,7 +348,7 @@ export function TripOutputNode({ id, data }: NodeProps<GraphNodeData>) {
       {inputHandle}
       <div className="relative z-10">
         <div className="text-sm font-bold font-mono">
-          {isTripped ? '⚡ TRIP' : '⚡ ' + (data.nodeId ?? id)}
+          {'⚡ ' + (data.nodeId ?? id)}
         </div>
         <div className="text-xs opacity-80">{displayInfo.subtitle}</div>
         {displayInfo.settings.length > 0 && (
@@ -620,34 +620,45 @@ const AREA_ACCENT: Record<LogicAreaNodeData['kind'], string> = {
 
 export function LogicAreaNode({ data }: NodeProps<LogicAreaNodeData>) {
   const hideArea = useUIStore(s => s.hideArea);
+  const setAreaSize = useUIStore(s => s.setAreaSize);
   const accent = AREA_ACCENT[data.kind] ?? AREA_ACCENT.output;
 
   return (
-    <div
-      style={{
-        width: data.width,
-        height: data.height,
-        border: `2px solid ${accent}`,
-        borderRadius: 10,
-        background: `color-mix(in srgb, ${accent} 6%, var(--surface, #ffffff))`,
-        boxSizing: 'border-box',
-        overflow: 'hidden',
-      }}
-    >
+    <>
+      {/* Drag the corners/edges to resize the window. */}
+      <NodeResizer
+        minWidth={200}
+        minHeight={120}
+        lineStyle={{ borderColor: accent, opacity: 0.4 }}
+        handleStyle={{ width: 9, height: 9, borderRadius: 2, background: '#fff', border: `2px solid ${accent}` }}
+        onResizeEnd={(_e, params) => setAreaSize(data.areaId, params.width, params.height)}
+      />
       <div
-        className="flex items-center justify-between gap-2 px-2"
-        style={{ height: 26, background: accent, color: '#fff' }}
+        style={{
+          width: '100%',
+          height: '100%',
+          border: `2px solid ${accent}`,
+          borderRadius: 10,
+          background: `color-mix(in srgb, ${accent} 6%, var(--surface, #ffffff))`,
+          boxSizing: 'border-box',
+          overflow: 'hidden',
+        }}
       >
-        <span className="truncate font-mono text-xs font-bold">{data.label}</span>
-        <button
-          className="nodrag flex-shrink-0 rounded p-0.5 hover:bg-black/20"
-          title="Hide this area"
-          onClick={(e) => { e.stopPropagation(); hideArea(data.areaId); }}
+        <div
+          className="flex items-center justify-between gap-2 px-2"
+          style={{ height: 26, background: accent, color: '#fff' }}
         >
-          <X className="w-3 h-3" />
-        </button>
+          <span className="truncate font-mono text-xs font-bold">{data.label}</span>
+          <button
+            className="nodrag flex-shrink-0 rounded p-0.5 hover:bg-black/20"
+            title="Hide this area"
+            onClick={(e) => { e.stopPropagation(); hideArea(data.areaId); }}
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 

@@ -1,9 +1,12 @@
-import type { LogicEquation } from '../relay-adapters/common/types';
+import type { LogicEquation, ParsedRelaySettings } from '../relay-adapters/common/types';
 import type { DependencyGraph } from '../selogic/graph';
 import { selectPattern, type PatternId } from './patterns';
 import { parseExpression } from '../selogic/parser';
 import { collectSignals } from '../selogic/ast';
 import { enumerateTripPaths, buildInhibitConditions } from '../selogic/trip-paths';
+import { partitionGraph, type LogicArea } from '../graph/partition';
+import { parseOutputContacts } from '../graph/buildReactFlow';
+import { extractEnabledLeds, extractEnabledPushbuttons } from '../graph/ledPb';
 
 // ─── Test Step Types ──────────────────────────────────────────────────────────
 
@@ -49,6 +52,12 @@ export interface GeneratedTestCase {
   // ── Coverage gap flag ────────────────────────────────────────────────────────
   /** True when no analog injection profile covers this operand. */
   coverageGap?: boolean;
+
+  // ── Logic-area grouping ──────────────────────────────────────────────────────
+  /** Partition area this test belongs to (e.g. "area_OUT101"). */
+  areaId?: string;
+  /** Human area label this test proves (e.g. "Trip — OUT101 / TR"). */
+  areaLabel?: string;
 }
 
 // ─── Wait/check constants ─────────────────────────────────────────────────────
@@ -410,6 +419,62 @@ export function generateAllTestCases(
       result.push(...generateTripTestCases(eq, graph));
     } else {
       result.push(generateNonTripTestCase(eq, graph));
+    }
+  }
+  return result;
+}
+
+// ─── Area-driven generation ─────────────────────────────────────────────────
+
+/** Find the equation that proves a logic area (the root's driving logic). */
+function areaProofEquation(
+  area: LogicArea,
+  graph: DependencyGraph,
+  relay: ParsedRelaySettings,
+): LogicEquation | null {
+  // Prefer a root that has a real graph equation (coil / SV / latch).
+  for (const r of area.rootIds) {
+    const n = graph.nodes.get(r);
+    if (n?.equation) return n.equation;
+  }
+  // Otherwise synthesize one from the root's driving expression
+  // (output contact, LED, or pushbutton).
+  const root = area.rootIds[0];
+  let expr: string | undefined = parseOutputContacts(relay).get(root);
+  if (!expr) expr = extractEnabledLeds(relay).find(l => l.id === root)?.expression;
+  if (!expr) expr = extractEnabledPushbuttons(relay).find(p => p.id === root)?.expression;
+  if (!expr) return null;
+  return {
+    label: root,
+    expression: expr,
+    description: area.label,
+    functionType: 'GENERAL',
+    source: { sourceFile: '', lineNumber: 0, rawText: '' },
+  };
+}
+
+/**
+ * Generate test cases grouped by the logic areas shown on the graph (one group
+ * per area — outputs, SVs, LEDs, PBs). Each case is tagged with its `areaId` /
+ * `areaLabel` so the Review tab organizes by logic, not by individual element.
+ */
+export function generateAllTestCasesByArea(
+  graph: DependencyGraph,
+  relay: ParsedRelaySettings | null,
+): GeneratedTestCase[] {
+  if (!relay) return [];
+  const { areas } = partitionGraph(graph, relay, { includeLedPb: true });
+  const result: GeneratedTestCase[] = [];
+  for (const area of areas) {
+    const eq = areaProofEquation(area, graph, relay);
+    if (!eq) continue;
+    const cases = eq.functionType === 'TRIP'
+      ? generateTripTestCases(eq, graph)
+      : [generateNonTripTestCase(eq, graph)];
+    for (const c of cases) {
+      c.areaId = area.id;
+      c.areaLabel = area.label;
+      result.push(c);
     }
   }
   return result;

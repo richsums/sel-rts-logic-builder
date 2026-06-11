@@ -92,6 +92,27 @@ export function buildDependencyGraph(equations: LogicEquation[]): DependencyGrap
     }
   }
 
+  // Synthesize SV timed-bit links: a referenced `SVnT` (timed word bit) tracks
+  // its raw `SVn` SELOGIC variable through the PU/DO timer. This connects the
+  // SV's upstream logic to the SVnT bit and lets simulation propagate SVn→SVnT.
+  for (const [id, node] of nodes) {
+    if (!/^SV\d+T$/i.test(id) || !node.isInput) continue;
+    const base = id.replace(/T$/i, '');
+    const baseNode = nodes.get(base);
+    if (!baseNode) continue;
+    node.isInput = false;
+    node.dependencies = [base];
+    node.description = `${base} timed output (PU/DO)`;
+    node.equation = {
+      label: id,
+      expression: base,
+      description: node.description,
+      source: baseNode.equation?.source ?? { sourceFile: '', lineNumber: 0, rawText: '' },
+      functionType: 'TIMER_OUT',
+    };
+    if (!baseNode.dependents.includes(id)) baseNode.dependents.push(id);
+  }
+
   // Third pass: compute topological depth via BFS from roots
   const roots = Array.from(nodes.values())
     .filter(n => n.dependencies.length === 0)

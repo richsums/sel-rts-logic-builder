@@ -26,7 +26,7 @@ import ReactFlow, {
   type Viewport,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { GitBranch, RotateCcw, Zap, Lightbulb, Eye, EyeOff, LayoutGrid } from 'lucide-react';
+import { GitBranch, RotateCcw, Zap, Lightbulb, Eye, EyeOff, LayoutGrid, Cpu } from 'lucide-react';
 import { useProjectStore } from '../store/project';
 import { useUIStore, type AnimationSpeed } from '../store/ui';
 import { NODE_TYPES, type GraphNodeData } from '../graph/nodes';
@@ -37,6 +37,7 @@ import {
 } from '../graph/buildReactFlow';
 import { buildAreaLayout } from '../graph/areaLayout';
 import { partitionGraph } from '../graph/partition';
+import { FrontPanel } from './FrontPanel';
 import {
   propagate,
   initialSignalStates,
@@ -56,13 +57,13 @@ function GraphViewerInner() {
     graphViewport: storedViewport, graphProjectId,
     signalStates, animationSpeed, lastChangeCount,
     pulsingEdgeIds, flashingNodes,
-    showLedPb, hiddenAreaIds,
+    showLedPb, hiddenAreaIds, showFrontPanel,
     saveGraphLayout, setGraphLayout,
     setSignalStates, resetSignalStates,
     setAnimationSpeed, setLastChangeCount,
     setPulsingEdgeIds, setFlashingNodes, clearAnimations,
     clearTimerStates,
-    toggleLedPb, hideArea, showArea, showAllAreas,
+    toggleLedPb, toggleFrontPanel, hideArea, showArea, showAllAreas,
   } = useUIStore();
 
   const { setViewport } = useReactFlow();
@@ -163,20 +164,22 @@ function GraphViewerInner() {
     if (!graph) return;
     if (!didMountAreas.current) { didMountAreas.current = true; return; }
 
-    const priorPos = new Map<string, { x: number; y: number }>();
+    // Preserve user-dragged position AND resized dimensions of each area window.
+    const priorArea = new Map<string, { position: { x: number; y: number }; style?: React.CSSProperties }>();
     for (const nd of nodes) {
-      if (nd.type === 'logicAreaNode') priorPos.set(nd.id, nd.position);
+      if (nd.type === 'logicAreaNode') priorArea.set(nd.id, { position: nd.position, style: nd.style });
     }
 
     const { nodes: n, edges: e } = buildAreaLayout(graph, relay, signalStates, handleToggle, {
       includeLedPb: showLedPb,
       hiddenAreaIds: new Set(hiddenAreaIds),
     });
-    const merged = n.map(nd =>
-      nd.type === 'logicAreaNode' && priorPos.has(nd.id)
-        ? { ...nd, position: priorPos.get(nd.id)! }
-        : nd,
-    );
+    const merged = n.map(nd => {
+      const prior = nd.type === 'logicAreaNode' ? priorArea.get(nd.id) : undefined;
+      return prior
+        ? { ...nd, position: prior.position, style: { ...nd.style, ...prior.style } }
+        : nd;
+    });
     setNodes(merged);
     setEdges(e);
     setGraphLayout(merged, e, activeProjectId ?? '');
@@ -312,6 +315,18 @@ function GraphViewerInner() {
             LEDs / PBs
           </button>
 
+          {/* Front-panel mockup toggle */}
+          <button
+            onClick={toggleFrontPanel}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+              showFrontPanel ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+            title="Show the relay front-panel mockup (live LEDs + clickable pushbuttons)"
+          >
+            <Cpu className="w-3.5 h-3.5" />
+            Front Panel
+          </button>
+
           {/* Areas show/hide dropdown */}
           <div className="relative">
             <button
@@ -373,7 +388,15 @@ function GraphViewerInner() {
       </div>
 
       {/* Canvas */}
-      <div className="flex-1">
+      <div className="flex-1 relative">
+        {showFrontPanel && (
+          <FrontPanel
+            relay={relay}
+            signalStates={signalStates}
+            onToggle={handleToggle}
+            onClose={toggleFrontPanel}
+          />
+        )}
         <ReactFlow
           nodes={nodes}
           edges={edges}

@@ -40,6 +40,8 @@ export interface UIState {
   // ── Logic-area windows ────────────────────────────────────────────────────
   /** Whether LED / front-panel PB areas are shown on the graph. */
   showLedPb: boolean;
+  /** Whether the relay front-panel mockup overlay is shown. */
+  showFrontPanel: boolean;
   /** Area ids the user has hidden from the graph. */
   hiddenAreaIds: string[];
 
@@ -80,12 +82,16 @@ export interface UIState {
 
   /** Toggle LED / PB areas on the graph. */
   toggleLedPb: () => void;
+  /** Toggle the front-panel mockup overlay. */
+  toggleFrontPanel: () => void;
   /** Hide a logic area (window) from the graph. */
   hideArea: (areaId: string) => void;
   /** Restore a single hidden area. */
   showArea: (areaId: string) => void;
   /** Restore all hidden areas. */
   showAllAreas: () => void;
+  /** Persist a resized area window's dimensions. */
+  setAreaSize: (areaId: string, width: number, height: number) => void;
 
   /** Replace signal states (called after propagation). */
   setSignalStates: (states: SignalStates) => void;
@@ -138,6 +144,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   graphViewport:  DEFAULT_VIEWPORT,
   graphProjectId: null,
   showLedPb:      false,
+  showFrontPanel: false,
   hiddenAreaIds:  [],
 
   // Simulation state
@@ -175,6 +182,7 @@ export const useUIStore = create<UIState>((set, get) => ({
     ),
 
   toggleLedPb: () => set(state => ({ showLedPb: !state.showLedPb })),
+  toggleFrontPanel: () => set(state => ({ showFrontPanel: !state.showFrontPanel })),
   hideArea: (areaId) =>
     set(state =>
       state.hiddenAreaIds.includes(areaId)
@@ -184,6 +192,14 @@ export const useUIStore = create<UIState>((set, get) => ({
   showArea: (areaId) =>
     set(state => ({ hiddenAreaIds: state.hiddenAreaIds.filter(id => id !== areaId) })),
   showAllAreas: () => set({ hiddenAreaIds: [] }),
+  setAreaSize: (areaId, width, height) =>
+    set(state => ({
+      graphNodes: state.graphNodes.map(n =>
+        n.id === areaId
+          ? { ...n, style: { ...n.style, width, height }, data: { ...n.data, width, height } }
+          : n,
+      ),
+    })),
 
   // ── Simulation actions ────────────────────────────────────────────────────
   setSignalStates:    (states) => set({ signalStates: states }),

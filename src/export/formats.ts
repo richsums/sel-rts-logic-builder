@@ -19,6 +19,8 @@ export interface ScriptRecord {
   approved: boolean;
   modified: boolean;
   filename: string;
+  /** Logic-area label this test proves (groups the Review tab by area). */
+  areaLabel?: string;
   /** Validation errors — scripts with errors are excluded from export */
   validationErrors: string[];
   validationWarnings: string[];
