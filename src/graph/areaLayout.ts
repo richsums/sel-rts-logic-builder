@@ -18,7 +18,7 @@ import { partitionGraph, type LogicArea, type AreaKind } from './partition';
 // ─── Layout constants ─────────────────────────────────────────────────────────
 
 const HEADER_H = 38;
-const PAD = 24;
+const PAD = 32;
 const GAP_X = 90;
 const GAP_Y = 90;
 const MAX_ROW_W = 4200;
@@ -38,11 +38,36 @@ export interface AreaBuildOptions {
   hiddenAreaIds?: Set<string>;
 }
 
-/** Bounding box of a set of laid-out nodes (using per-type sizes). */
+/**
+ * Realistic RENDERED dimensions per node type, used only to size area frames.
+ * The card components grow with their settings rows (pickup/TD/curve, PU/DO,
+ * SET/RST pins), so the layout engine's estimates undershoot and children were
+ * rendering past the window border. Kept separate from layout.ts NODE_SIZES so
+ * internal column spacing (and its pinned tests) is unaffected.
+ */
+const RENDER_SIZES: Record<string, { width: number; height: number }> = {
+  protectionElement: { width: 195, height: 195 },
+  timerNode:         { width: 180, height: 200 },
+  latchNode:         { width: 180, height: 140 },
+  logicGateNode:     { width: 170, height: 100 },
+  inputSignalNode:   { width: 160, height: 80 },
+  outputContactNode: { width: 175, height: 120 },
+  tripOutputNode:    { width: 215, height: 150 },
+  andGate:           { width: 75,  height: 95 },
+  orGate:            { width: 75,  height: 95 },
+  notGate:           { width: 75,  height: 60 },
+  edgeGate:          { width: 75,  height: 60 },
+};
+
+function renderSizeForType(nodeType: string): { width: number; height: number } {
+  return RENDER_SIZES[nodeType] ?? nodeSizeForType(nodeType);
+}
+
+/** Bounding box of a set of laid-out nodes (using rendered per-type sizes). */
 function contentBBox(nodes: Node[]) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const n of nodes) {
-    const { width, height } = nodeSizeForType(n.type ?? 'default');
+    const { width, height } = renderSizeForType(n.type ?? 'default');
     minX = Math.min(minX, n.position.x);
     minY = Math.min(minY, n.position.y);
     maxX = Math.max(maxX, n.position.x + width);

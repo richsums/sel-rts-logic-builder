@@ -1,9 +1,14 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
+  content: {
+    // relative: true -> globs resolve against THIS file, not process.cwd(),
+    // so utility generation is identical regardless of launch directory.
+    relative: true,
+    files: [
+      "./index.html",
+      "./src/**/*.{js,ts,jsx,tsx}",
+    ],
+  },
   theme: {
     extend: {
       colors: {

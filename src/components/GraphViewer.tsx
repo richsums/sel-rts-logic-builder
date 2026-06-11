@@ -166,10 +166,16 @@ function GraphViewerInner() {
     if (!graph) return;
     if (!didMountAreas.current) { didMountAreas.current = true; return; }
 
-    // Preserve user-dragged position AND resized dimensions of each area window.
+    // Preserve user-dragged position of each area window. Sizes are preserved
+    // ONLY when the window's content is unchanged — toggling SV/LT windows
+    // expands logic inline into other windows, and keeping the old (smaller)
+    // frame would leave the new nodes rendering outside the border.
     const priorArea = new Map<string, { position: { x: number; y: number }; style?: React.CSSProperties }>();
+    const priorKids = new Map<string, string>();
     for (const nd of nodes) {
       if (nd.type === 'logicAreaNode') priorArea.set(nd.id, { position: nd.position, style: nd.style });
+      const parent = (nd as { parentNode?: string }).parentNode;
+      if (parent) priorKids.set(parent, (priorKids.get(parent) ?? '') + nd.id + '|');
     }
 
     const { nodes: n, edges: e } = buildAreaLayout(graph, relay, signalStates, handleToggle, {
@@ -178,11 +184,18 @@ function GraphViewerInner() {
       includeLt: showLtAreas,
       hiddenAreaIds: new Set(hiddenAreaIds),
     });
+    const newKids = new Map<string, string>();
+    for (const nd of n) {
+      const parent = (nd as { parentNode?: string }).parentNode;
+      if (parent) newKids.set(parent, (newKids.get(parent) ?? '') + nd.id + '|');
+    }
     const merged = n.map(nd => {
       const prior = nd.type === 'logicAreaNode' ? priorArea.get(nd.id) : undefined;
-      return prior
+      if (!prior) return nd;
+      const contentUnchanged = priorKids.get(nd.id) === newKids.get(nd.id);
+      return contentUnchanged
         ? { ...nd, position: prior.position, style: { ...nd.style, ...prior.style } }
-        : nd;
+        : { ...nd, position: prior.position };  // re-fit frame to new content
     });
     setNodes(merged);
     setEdges(e);
