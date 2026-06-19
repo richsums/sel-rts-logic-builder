@@ -12,6 +12,7 @@ import { detectSEL451 }  from '../relay-adapters/sel451';
 import { detectSEL711 }  from '../relay-adapters/sel711';
 import { detectSEL751 }  from '../relay-adapters/sel751';
 import { detectSEL787 }  from '../relay-adapters/sel787';
+import { detectSEL487B } from '../relay-adapters/sel487b';
 import { detectSEL2411 } from '../relay-adapters/sel2411';
 import { parseSEL351 }   from '../relay-adapters/sel351';
 import { parseSEL411L }  from '../relay-adapters/sel411l';
@@ -20,6 +21,7 @@ import { parseSEL451 }   from '../relay-adapters/sel451';
 import { parseSEL711 }   from '../relay-adapters/sel711';
 import { parseSEL751 }   from '../relay-adapters/sel751';
 import { parseSEL787 }   from '../relay-adapters/sel787';
+import { parseSEL487B }  from '../relay-adapters/sel487b';
 import { parseSEL2411 }  from '../relay-adapters/sel2411';
 import type { DetectionResult, RelayModelId } from '../relay-adapters/common/types';
 
@@ -29,7 +31,7 @@ import type { DetectionResult, RelayModelId } from '../relay-adapters/common/typ
 const DETECTORS = [
   detectSEL411L, detectSEL421, detectSEL451,
   detectSEL711,  detectSEL751, detectSEL787,
-  detectSEL2411, detectSEL351,
+  detectSEL487B, detectSEL2411, detectSEL351,
 ];
 
 /** Parse concatenated text using the best-matching adapter. */
@@ -41,6 +43,7 @@ function parseWithModel(text: string, model: RelayModelId, filename: string) {
     case 'SEL-711':  return parseSEL711(text, filename);
     case 'SEL-751':  return parseSEL751(text, filename);
     case 'SEL-787':  return parseSEL787(text, filename);
+    case 'SEL-487B': return parseSEL487B(text, filename);
     case 'SEL-2411': return parseSEL2411(text, filename);
     default:          return parseSEL351(text, filename);
   }
@@ -436,7 +439,7 @@ export function ImportPanel() {
           <h3 className="font-semibold text-slate-700">Demo Project (8 Relay Instances)</h3>
         </div>
         <p className="text-sm text-slate-500 mb-3">
-          Load all 8 supported relay models pre-configured with SELogic — SEL-351 FDR01 through SEL-2411 PAC01.
+          Load all supported relay models pre-configured with SELogic — SEL-351 FDR01 through SEL-2411 PAC01.
           Graph defaults to the SEL-421 POTT scheme.
         </p>
         <button
@@ -468,6 +471,7 @@ export function ImportPanel() {
           { model: 'SEL-711',  desc: 'Feeder+79',         el: '50/51/79' },
           { model: 'SEL-751',  desc: 'Feeder+SEF',        el: '50/51/67/SEF' },
           { model: 'SEL-787',  desc: 'Transformer Diff',  el: '87T/51N/REF' },
+          { model: 'SEL-487B', desc: 'Bus Differential',  el: '87B/50BF/CZ' },
           { model: 'SEL-2411', desc: 'PAC Controller',    el: 'Custom logic' },
         ].map(m => (
           <div key={m.model} className="bg-white rounded-lg p-3 border border-slate-200">
