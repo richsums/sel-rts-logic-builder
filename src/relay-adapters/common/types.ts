@@ -17,6 +17,7 @@ export type RelayModelId =
   | 'SEL-711'
   | 'SEL-751'
   | 'SEL-787'
+  | 'SEL-487B'
   | 'SEL-2411'
   | 'UNKNOWN';
 
